@@ -1,20 +1,24 @@
 import os, re, json, urllib.parse
 from decimal import Decimal
-from flask import Flask, request, jsonify, send_from_directory
+from datetime import datetime
+from functools import wraps
+
+from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import NullPool
+from sqlalchemy.exc import IntegrityError
 from dotenv import load_dotenv
-from openai import AzureOpenAI
-from datetime import datetime
+import msal
 
+# ------------ Load .env ------------
 load_dotenv()
 
-app = Flask(__name__, static_folder="static")
+app = Flask(__name__, static_folder="static", template_folder="templates")
+app.secret_key = os.getenv("FLASK_SECRET", "super_secret_for_sessions")
 
-# Memory for follow-up answers
-LAST_ROWS = {}
+# ------------ Azure OpenAI ------------
+from openai import AzureOpenAI
 
-# ---------------- Azure OpenAI Client ---------------- #
 def get_llm():
     return AzureOpenAI(
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
@@ -24,49 +28,58 @@ def get_llm():
 
 DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")
 
+# ------------ MSAL (Entra) ------------
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+TENANT_ID = os.getenv("TENANT_ID")
+AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+REDIRECT_URI = os.getenv("REDIRECT_URI")
+SCOPE = ["User.Read"]
 
-# ---------------- Database Engine ---------------- #
-def build_engine(db_type, conn_str):
-    if db_type in ["azure", "mssql"] and "Driver=" in conn_str:
+def _msal_app(cache=None):
+    return msal.ConfidentialClientApplication(
+        CLIENT_ID, authority=AUTHORITY,
+        client_credential=CLIENT_SECRET, token_cache=cache
+    )
+
+# ------------ DB connection helpers ------------
+def build_engine_from_connstr(conn_str: str):
+    # Always use pyodbc ODBC string format for SQL Server
+    if "Driver=" in conn_str:
         return create_engine(
             "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(conn_str),
-            poolclass=NullPool,
-            future=True,
+            poolclass=NullPool, future=True
         )
     return create_engine(conn_str, poolclass=NullPool, future=True)
 
+def get_admin_engine():
+    return build_engine_from_connstr(os.getenv("ADMIN_DB_CONN"))
 
-# ---------------- Convert Decimal ---------------- #
+PROJECT_TO_CONN_ENV = {
+    "Billio": "BILLIO_DB_CONN",
+    "Sales":  "SALES_DB_CONN"
+}
+
+def get_project_engine(project_name: str):
+    env_key = PROJECT_TO_CONN_ENV.get(project_name)
+    if not env_key:
+        raise ValueError(f"No connection configured for project: {project_name}")
+    conn = os.getenv(env_key)
+    if not conn:
+        raise ValueError(f"Missing env for {env_key}")
+    return build_engine_from_connstr(conn)
+
+# ------------ Safe conversions ------------
 def convert_values(obj):
     if isinstance(obj, Decimal):
         return float(obj)
     return obj
 
-
-# ---------------- Schema Introspection ---------------- #
-def introspect_schema(engine, only_tables=None):
-    insp = inspect(engine)
-    out = []
-    for t in insp.get_table_names():
-        if only_tables and t not in only_tables:
-            continue
-        try:
-            cols = insp.get_columns(t)
-        except:
-            cols = []
-        for c in cols:
-            out.append({
-                "table": t,
-                "column": c["name"],
-                "type": str(c["type"])
-            })
-    return out
-
-
-# ---------------- Extract SQL ---------------- #
-def extract_sql(text):
-    if "```" in text:
-        parts = text.split("```")
+# ------------ LLM helpers ------------
+def extract_sql(text_in):
+    """Pull a single runnable SELECT from LLM output inside triple backticks."""
+    if "```" in text_in:
+        parts = text_in.split("```")
         for p in parts:
             if re.search(r"\bselect\b|\bwith\b", p, flags=re.I):
                 cleaned = "\n".join(
@@ -74,63 +87,74 @@ def extract_sql(text):
                     if not ln.strip().lower().startswith("sql")
                 )
                 return cleaned.strip()
-    return text.strip()
+    return text_in.strip()
 
-
-# ---------------- SAFE SQL CHECK ---------------- #
-DANGEROUS = re.compile(
-    r"\b(insert|update|delete|truncate|drop|alter|create|replace)\b",
-    re.I
-)
-
+DANGEROUS = re.compile(r"\b(insert|update|delete|truncate|drop|alter|create|replace|merge)\b", re.I)
 def is_unsafe(sql):
     return bool(DANGEROUS.search(sql))
 
+def conversational_summary_from_rows(question, rows):
+    """
+    Balanced conversational + professional summary (2–6 sentences).
+    No SQL, no code. Human-readable.
+    """
+    client = get_llm()
+    prompt = f"""
+You are a senior data analyst. Write a concise, professional, conversational answer for a business user.
 
-# ---------------- RUN SQL — FINAL 100% FIXED VERSION ---------------- #
+Guidelines:
+- 2–6 short sentences, natural tone (balanced: not too casual, not too formal).
+- Explain the key figures and context clearly.
+- If dates or ranges are evident, mention them simply.
+- If the data is empty, say so politely and suggest a likely reason.
+- Do NOT include SQL or code.
+
+User question:
+{question}
+
+Rows (JSON sample):
+{json.dumps(rows, default=str)[:12000]}
+"""
+    try:
+        resp = client.chat.completions.create(
+            model=DEPLOYMENT,
+            messages=[{"role":"user","content":prompt}],
+            temperature=0.2
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception:
+        if not rows:
+            return ("I couldn’t find any records for that request. "
+                    "We can try a different time range or filter.")
+        return ("Here’s a brief summary of the result above. "
+                "Tell me if you want this broken down by time, product, or region.")
+
+# ------------ SQL execution + table render ------------
 def run_sql(engine, sql, limit=500):
     rows = []
     with engine.connect() as conn:
         result = conn.execute(text(sql))
-
         if result.returns_rows:
-
-            # FIX: ALWAYS use mappings() to avoid RMKeyView or tuple rows
             for i, row in enumerate(result.mappings()):
                 row_dict = {k: convert_values(v) for k, v in row.items()}
                 rows.append(row_dict)
-
                 if i + 1 >= limit:
                     break
-
         else:
             rows.append({"message": f"Affected rows: {result.rowcount}"})
-
     return rows
 
-
-# ---------------- FORMAT TABLE ---------------- #
 def format_table(rows):
     if not rows:
-        return "<p>No data found.</p>"
-
-    def short(x):
-        if isinstance(x, str) and len(x) > 12:
-            return x[:6] + "…" + x[-4:]
-        return x
-
-    def format_date(val):
-        if isinstance(val, str) and "T" in val:
-            try:
-                dt = datetime.fromisoformat(val.replace("Z", ""))
-                return dt.strftime("%d-%b-%Y")
-            except:
-                return val
-        return val
+        return "<div class='no-results'>No data found.</div>"
 
     headers = rows[0].keys()
-
-    html = "<table class='nice'><thead><tr>"
+    html = """
+    <div class='result-table-wrap'>
+        <table class='result-table'>
+            <thead>
+                <tr>
+    """
     for h in headers:
         html += f"<th>{h}</th>"
     html += "</tr></thead><tbody>"
@@ -138,217 +162,440 @@ def format_table(rows):
     for r in rows:
         html += "<tr>"
         for h in headers:
-            v = r[h]
-            if h.lower() == "bloburl":
-                html += f"<td><a href='{v}' target='_blank'>View</a></td>"
-            else:
-                html += f"<td>{format_date(short(v))}</td>"
-        html += "</tr>"
-
-    html += "</tbody></table>"
-    return html
-
-
-# ---------------- BUSINESS BULLET SUMMARY (100% ACCURATE) ---------------- #
-def generate_bullet_summary(rows):
-    if not rows:
-        return "• No records found."
-
-    # ---------------- Detect numeric columns ---------------- #
-    numeric_cols = set()
-    for r in rows:
-        for k, v in r.items():
+            val = r[h]
+            # Format long strings
+            if isinstance(val, str) and len(val) > 28:
+                val = val[:14] + "…" + val[-10:]
+            # Format ISO dates
             try:
-                float(v)
-                numeric_cols.add(k)
+                if isinstance(val, str) and "T" in val:
+                    dt = datetime.fromisoformat(val.replace("Z", ""))
+                    val = dt.strftime("%d-%b-%Y")
             except:
                 pass
+            html += f"<td>{val}</td>"
+        html += "</tr>"
+    html += "</tbody></table></div>"
+    return html
 
-    # ---------------- Detect date columns ---------------- #
-    date_cols = set()
-    for r in rows:
-        for k, v in r.items():
-            if isinstance(v, str) and ("-" in v or "T" in v):
-                try:
-                    datetime.fromisoformat(v.replace("Z", ""))
-                    date_cols.add(k)
-                except:
-                    pass
+# ========== SESSION / AUTH GUARDS ==========
+def login_required(f):
+    @wraps(f)
+    def inner(*args, **kwargs):
+        if "email" not in session:
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return inner
 
-    summary = []
+def admin_required(f):
+    @wraps(f)
+    def inner(*args, **kwargs):
+        if "email" not in session:
+            return redirect(url_for("login"))
+        email = session["email"]
+        with get_admin_engine().connect() as conn:
+            q = """
+            SELECT 1
+            FROM Users u
+            JOIN UserProjectRoles upr ON upr.UserID = u.UserID
+            JOIN Roles r ON r.RoleID = upr.RoleID
+            WHERE u.Email = :email AND r.RoleName = 'Admin'
+            """
+            row = conn.execute(text(q), {"email": email}).first()
+            if not row:
+                return "Access denied (Admin only)", 403
+        return f(*args, **kwargs)
+    return inner
 
-    # ---------------- Latest Date ---------------- #
-    for col in date_cols:
+# ========== MSAL ROUTES ==========
+@app.get("/login")
+def login():
+    auth_url = _msal_app().get_authorization_request_url(SCOPE, redirect_uri=REDIRECT_URI)
+    return redirect(auth_url)
+
+@app.get("/getAToken")
+def getAToken():
+    if "code" not in request.args:
+        return "Login failed"
+    result = _msal_app().acquire_token_by_authorization_code(
+        request.args["code"], scopes=SCOPE, redirect_uri=REDIRECT_URI
+    )
+    if "access_token" in result:
+        email = result["id_token_claims"].get("preferred_username") or result["id_token_claims"].get("upn")
+        session["email"] = email
+        return redirect(url_for("home"))
+    return f"Auth error: {result.get('error_description')}"
+
+@app.get("/logout")
+def logout():
+    session.clear()
+    tenant = TENANT_ID
+    post_logout = urllib.parse.quote_plus(os.getenv("POST_LOGOUT_REDIRECT_URI", url_for("login", _external=True)))
+    aad_logout = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/logout?post_logout_redirect_uri={post_logout}"
+    return redirect(aad_logout)
+
+# ========== BASIC PAGES ==========
+@app.get("/")
+def root():
+    if "email" in session:
+        return redirect(url_for("home"))
+    return render_template("login.html")
+
+@app.get("/home")
+@login_required
+def home():
+    return render_template("home.html", email=session["email"])
+
+@app.get("/chatui")
+@login_required
+def chatui():
+    return send_from_directory("static", "chat.html")
+
+@app.get("/admin")
+@admin_required
+def admin_page():
+    return send_from_directory("static", "admin.html")
+
+# ========== ADMIN DB QUERIES ==========
+def get_user_projects_and_roles(email:str):
+    sql = """
+    SELECT p.ProjectName, r.RoleName
+    FROM Users u
+    JOIN UserProjectRoles upr ON upr.UserID = u.UserID
+    JOIN Projects p ON p.ProjectID = upr.ProjectID
+    JOIN Roles r ON r.RoleID = upr.RoleID
+    WHERE u.Email = :email
+    """
+    with get_admin_engine().connect() as conn:
+        rows = conn.execute(text(sql), {"email": email}).mappings().all()
+        return [{"project": r["ProjectName"], "role": r["RoleName"]} for r in rows]
+
+def get_allowed_tables(email:str, project:str):
+    sql = """
+    SELECT perm.TableName, perm.CanRead, perm.CanReadSelf, r.RoleName
+    FROM Users u
+    JOIN UserProjectRoles upr ON upr.UserID = u.UserID
+    JOIN Projects p ON p.ProjectID = upr.ProjectID
+    JOIN Roles r ON r.RoleID = upr.RoleID
+    JOIN Permissions perm ON perm.ProjectID = p.ProjectID AND perm.RoleID = r.RoleID
+    WHERE u.Email = :email AND p.ProjectName = :project
+    """
+    with get_admin_engine().connect() as conn:
+        return [dict(x) for x in conn.execute(text(sql), {"email": email, "project": project}).mappings().all()]
+
+def list_project_tables_from_admin(project:str):
+    sql = """
+    SELECT td.TableName
+    FROM TableDirectory td
+    JOIN Projects p ON p.ProjectID = td.ProjectID
+    WHERE p.ProjectName = :project
+    ORDER BY td.TableName
+    """
+    with get_admin_engine().connect() as conn:
+        return [r[0] for r in conn.execute(text(sql), {"project": project}).all()]
+
+# ========== APIs ==========
+@app.get("/api/me")
+@login_required
+def api_me():
+    email = session["email"]
+    mappings = get_user_projects_and_roles(email)
+    return jsonify({"email": email, "projects": mappings})
+
+@app.get("/api/accessible-schema")
+@login_required
+def api_accessible_schema():
+    project = request.args.get("project")
+    if not project:
+        return jsonify({"error":"project is required"}), 400
+
+    email = session["email"]
+    allowed = get_allowed_tables(email, project)
+    if not allowed:
+        return jsonify({"error": "No role in this project"}), 403
+
+    allowed_table_names = sorted({a["TableName"] for a in allowed if a["CanRead"] or a["CanReadSelf"]})
+    if not allowed_table_names:
+        return jsonify({"tables":[], "schema":[]})
+
+    engine = get_project_engine(project)
+    insp = inspect(engine)
+    schema_rows = []
+    for t in insp.get_table_names():
+        if t not in allowed_table_names:
+            continue
         try:
-            parsed = [
-                datetime.fromisoformat(r[col].replace("Z", ""))
-                for r in rows
-                if r.get(col)
-            ]
-            if parsed:
-                latest = max(parsed)
-                summary.append(
-                    f"• Latest value in **{col}**: {latest.strftime('%d-%b-%Y')}."
-                )
+            cols = insp.get_columns(t)
         except:
-            pass
+            cols = []
+        for c in cols:
+            schema_rows.append({"table": t, "column": c["name"], "type": str(c["type"])})
+    return jsonify({"tables": allowed_table_names, "schema": schema_rows})
 
-    # ---------------- Numeric Statistics ---------------- #
-    for col in numeric_cols:
-        try:
-            nums = [
-                float(r[col])
-                for r in rows
-                if r.get(col) not in (None, "", "null")
-            ]
-            if nums:
-                avg = sum(nums) / len(nums)
-                mx = max(nums)
-                mn = min(nums)
-
-                summary.append(
-                    f"• Column **{col}** → Avg: {avg:.2f}, Max: {mx:.2f}, Min: {mn:.2f}."
-                )
-        except:
-            pass
-
-    summary.append(f"• Total records analyzed: {len(rows)}.")
-
-    return "\n".join(summary)
-
-
-# ---------------- FOLLOW-UP DETECTION ---------------- #
+LAST_ROWS = {}
 def is_followup(question):
-    keywords = [
-        "which", "what", "when", "highest", "lowest", "average",
-        "count", "total", "how many", "summarize", "details"
-    ]
+    keywords = ["which","what","when","highest","lowest","average","count","total","how many","summarize","details"]
     return any(k in question.lower() for k in keywords)
 
-
-# ---------------- /chat ---------------- #
-@app.post("/chat")
-def chat():
+@app.post("/api/chat")
+@login_required
+def api_chat():
     data = request.json
-    question = data["question"].strip()
-    db_type = data["dbType"]
-    conn_str = data["connectionString"]
+    question = data.get("question","").strip()
+    project = data.get("project")  # required
     selected_tables = data.get("selectedTables", [])
 
-    # FOLLOW-UP
-    if is_followup(question) and "rows" in LAST_ROWS:
-        client = get_llm()
+    if not project:
+        return jsonify({"error":"project is required"}), 400
 
-        follow_prompt = f"""
-Answer the user's follow-up question using ONLY this data:
+    # 1) Get permissions
+    email = session["email"]
+    perms = get_allowed_tables(email, project)
+    if not perms:
+        return jsonify({"error":"You do not have access to this project"}), 403
 
-{json.dumps(LAST_ROWS['rows'], indent=2, default=str)}
+    # map table -> (CanRead, CanReadSelf)
+    perm_map = {p["TableName"]: (bool(p["CanRead"]), bool(p["CanReadSelf"])) for p in perms}
 
-User question:
-{question}
+    # 2) Load schema limited to allowed tables
+    engine = get_project_engine(project)
+    insp = inspect(engine)
 
-Return a clear business-friendly answer.
-"""
+    if not selected_tables:
+        selected_tables = [t for t,(cr,cs) in perm_map.items() if cr or cs]
 
+    schema_rows = []
+    for t in insp.get_table_names():
+        if t not in selected_tables:
+            continue
+        if t not in perm_map:
+            continue
         try:
-            response = client.chat.completions.create(
-                model=DEPLOYMENT,
-                messages=[{"role": "user", "content": follow_prompt}],
-                temperature=0.2
-            )
-            answer = response.choices[0].message.content
+            cols = insp.get_columns(t)
+        except:
+            cols = []
+        for c in cols:
+            schema_rows.append({"table": t, "column": c["name"], "type": str(c["type"])})
+    schema_text = "\n".join(f"{r['table']}.{r['column']} ({r['type']})" for r in schema_rows)
 
-            return jsonify({
-                "sql": None,
-                "table_html": LAST_ROWS["table_html"],
-                "summary": answer
-            })
+    # 3) Follow-up answers on cached rows
+    if is_followup(question) and "rows" in LAST_ROWS:
+        answer = conversational_summary_from_rows(question, LAST_ROWS["rows"])
+        return jsonify({
+            "sql": None,
+            "table_html": LAST_ROWS.get("table_html"),
+            "summary": answer
+        })
 
-        except Exception as e:
-            return jsonify({"error": str(e)})
-
-    # NEW SQL GENERATION
-    engine = build_engine(db_type, conn_str)
-    schema_rows = introspect_schema(engine, selected_tables)
-    schema_text = "\n".join(
-        f"{r['table']}.{r['column']} ({r['type']})"
-        for r in schema_rows
-    )
-
+    # 4) Generate SQL with LLM
     client = get_llm()
     prompt = f"""
-You are an expert SQL generator. Follow these rules STRICTLY:
+You are an expert SQL generator.
 
-1. **Use ONLY the tables and columns listed below. Do NOT assume missing columns.**
-2. **Generate a single, valid, fully runnable SQL SELECT query.**
-3. **NEVER use INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, or REPLACE.**
-4. **If the user request cannot be satisfied using ONLY the provided schema, generate the closest possible valid SELECT query.**
-5. **Always alias tables clearly if joins are involved.**
-6. **If multiple tables are used, ALWAYS specify proper JOIN conditions based on column names.**
-7. **Always return SQL inside triple backticks. Nothing else.**
-8. **NEVER explain, never add comments, never add natural language. Only return SQL.**
-9. **Do NOT hallucinate columns. Only use columns EXACTLY as given.**
-
-AVAILABLE SCHEMA:
+Rules:
+1) Use ONLY these tables/columns:
 {schema_text}
+
+2) Generate ONE runnable SELECT (no DML/DDL).
+3) Always include table aliases if joining.
+4) NEVER use tables not listed.
+5) Return the SQL inside triple backticks ONLY.
+6) If you need user-specific info (like "my salary"), constrain by user identity column if present:
+   - If a table has an Email/UserEmail/Username column, filter by Email = '{email}'.
+   - If no such column exists, avoid leaking other people's data.
 
 USER QUESTION:
 {question}
-
-Return ONLY the SQL inside ```sql codeblock.
 """
-
     try:
         raw = client.chat.completions.create(
             model=DEPLOYMENT,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role":"user","content":prompt}],
             temperature=0.1
         ).choices[0].message.content
-
         sql = extract_sql(raw)
     except Exception as e:
-        return jsonify({"error": str(e)})
+        return jsonify({"error": str(e)}), 500
 
-    if is_unsafe(sql):
-        return jsonify({"error": "Unsafe SQL detected", "sql": sql})
+    # 5) Safety & RBAC
+    if is_unsafe(sql) or os.getenv("READ_ONLY","true").lower() == "true" and re.search(r"\b(insert|update|delete|alter|create|truncate|merge|drop)\b", sql, re.I):
+        return jsonify({"error":"Unsafe or non-read query blocked", "sql": sql}), 400
 
-    rows = run_sql(engine, sql)
+    # Ensure referenced tables are permitted
+    referenced = set(re.findall(r"\bfrom\s+([a-zA-Z0-9_\.\[\]]+)|\bjoin\s+([a-zA-Z0-9_\.\[\]]+)", sql, flags=re.I))
+    refs = set([p for tup in referenced for p in tup if p])
+    def clean_name(n):
+        n = n.strip("[]")
+        n = n.split()[0]
+        if "." in n:
+            n = n.split(".")[-1]
+        return n
+    refs = {clean_name(x) for x in refs}
+    not_allowed = [t for t in refs if t not in perm_map]
+    if not_allowed:
+        proj_label = project or "this project"
+        msg = ("Access denied\n\n"
+               f"Your current role in '{proj_label}' does not allow: {', '.join(not_allowed)}.\n"
+               "Please contact an administrator.")
+        return jsonify({"error": msg, "sql": sql}), 403
+
+    # 6) Execute
+    try:
+        rows = run_sql(engine, sql)
+    except Exception as e:
+        return jsonify({"error": f"Query failed: {e}", "sql": sql}), 500
+
     table_html = format_table(rows)
-    summary = generate_bullet_summary(rows)
+
+    # 7) Conversational summary
+    summary = conversational_summary_from_rows(question, rows)
 
     LAST_ROWS["rows"] = rows
     LAST_ROWS["table_html"] = table_html
 
-    return jsonify({
-        "sql": sql,
-        "table_html": table_html,
-        "summary": summary
-    })
+    return jsonify({"sql": sql, "table_html": table_html, "summary": summary})
 
+# ========== ADMIN APIs ==========
+@app.get("/api/admin/bootstrap")
+@admin_required
+def admin_bootstrap():
+    with get_admin_engine().connect() as conn:
+        users = [dict(x) for x in conn.execute(text("SELECT UserID,Email,Name FROM Users ORDER BY Email")).mappings().all()]
+        projects = [dict(x) for x in conn.execute(text("SELECT ProjectID,ProjectName FROM Projects ORDER BY ProjectName")).mappings().all()]
+        roles = [dict(x) for x in conn.execute(text("SELECT RoleID,RoleName FROM Roles ORDER BY RoleName")).mappings().all()]
+        td = [dict(x) for x in conn.execute(text("""
+            SELECT td.ID, p.ProjectName, td.TableName
+            FROM TableDirectory td JOIN Projects p ON p.ProjectID = td.ProjectID
+            ORDER BY p.ProjectName, td.TableName
+        """)).mappings().all()]
+    return jsonify({"users": users, "projects": projects, "roles": roles, "tables": td})
 
-# ---------------- /connect ---------------- #
-@app.post("/connect")
-def connect():
-    data = request.json
-    engine = build_engine(data["dbType"], data["connectionString"])
+# ---- Disable old write endpoints in True Save All mode ----
+@app.post("/api/admin/add-user")
+@admin_required
+def admin_add_user_disabled():
+    return jsonify({"error": "This action is disabled in True Save All mode. Use /api/admin/save-all"}), 409
 
+@app.post("/api/admin/grant-role")
+@admin_required
+def admin_grant_role_disabled():
+    return jsonify({"error": "This action is disabled in True Save All mode. Use /api/admin/save-all"}), 409
+
+@app.post("/api/admin/set-permissions-bulk")
+@admin_required
+def admin_set_permissions_bulk_disabled():
+    return jsonify({"error": "This action is disabled in True Save All mode. Use /api/admin/save-all"}), 409
+
+# ---- New atomic Save All ----
+@app.post("/api/admin/save-all")
+@admin_required
+def save_all():
+    """
+    Payload:
+    {
+      "user": {"email":"...", "name":"..."},
+      "grants": [ {"project":"...", "role":"..."} ],
+      "permissions": [
+        {"role":"...","project":"...","table":"...","canRead":true,"canReadSelf":false}
+      ]
+    }
+    """
     try:
-        with engine.connect():
-            pass
+        data = request.get_json(force=True) or {}
+        user = data.get("user")
+        grants = data.get("grants", [])
+        perms  = data.get("permissions", [])
+
+        # ---- Validation: required fields ----
+        if not user or not user.get("email") or not user.get("name"):
+            return jsonify({"error": "Please fill the required fields."}), 400
+
+        email = (user["email"] or "").strip().lower()
+        name  = (user["name"] or "").strip()
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            return jsonify({"error": "Please fill the required fields."}), 400
+
+        for g in grants:
+            if not g.get("project") or not g.get("role"):
+                return jsonify({"error": "Please fill the required fields."}), 400
+
+        for p in perms:
+            if not p.get("role") or not p.get("project") or not p.get("table"):
+                return jsonify({"error": "Please fill the required fields."}), 400
+
+        # ---- Transactional Save (atomic) ----
+        with get_admin_engine().begin() as conn:
+            # 1) Upsert user (UserID is IDENTITY)
+            upsert_user_sql = text("""
+                IF NOT EXISTS (SELECT 1 FROM Users WHERE Email = :e)
+                    INSERT INTO Users(Email, Name) VALUES(:e, :n);
+            """)
+            conn.execute(upsert_user_sql, {"e": email, "n": name})
+
+            # Update name if already exists (optional, keeps admin edits in sync)
+            conn.execute(text("UPDATE Users SET Name=:n WHERE Email=:e"), {"n": name, "e": email})
+
+            # Fetch UserID
+            user_id = conn.execute(text("SELECT UserID FROM Users WHERE Email=:e"), {"e": email}).scalar()
+            if not user_id:
+                raise RuntimeError("Failed to resolve UserID after insert")
+
+            # Utility to map names to IDs
+            def get_project_id(project_name: str):
+                return conn.execute(text("SELECT ProjectID FROM Projects WHERE ProjectName=:p"),
+                                    {"p": project_name}).scalar()
+
+            def get_role_id(role_name: str):
+                return conn.execute(text("SELECT RoleID FROM Roles WHERE RoleName=:r"),
+                                    {"r": role_name}).scalar()
+
+            # 2) Upsert user grants
+            for g in grants:
+                pid = get_project_id(g["project"])
+                rid = get_role_id(g["role"])
+                if not pid or not rid:
+                    raise RuntimeError(f"Unknown project/role: {g['project']} / {g['role']}")
+
+                conn.execute(text("""
+                    IF NOT EXISTS (
+                        SELECT 1 FROM UserProjectRoles WHERE UserID=:uid AND ProjectID=:pid
+                    )
+                        INSERT INTO UserProjectRoles(UserID, ProjectID, RoleID)
+                        VALUES(:uid, :pid, :rid)
+                    ELSE
+                        UPDATE UserProjectRoles SET RoleID=:rid
+                        WHERE UserID=:uid AND ProjectID=:pid
+                """), {"uid": user_id, "pid": pid, "rid": rid})
+
+            # 3) Upsert role-based permissions
+            for p in perms:
+                pid = get_project_id(p["project"])
+                rid = get_role_id(p["role"])
+                if not pid or not rid:
+                    raise RuntimeError(f"Unknown project/role in permissions: {p['project']} / {p['role']}")
+
+                can_read = 1 if p.get("canRead") else 0
+                can_self = 1 if p.get("canReadSelf") else 0
+
+                conn.execute(text("""
+                    IF NOT EXISTS (
+                        SELECT 1 FROM Permissions
+                        WHERE ProjectID=:pid AND RoleID=:rid AND TableName=:tbl
+                    )
+                        INSERT INTO Permissions(ProjectID, RoleID, TableName, CanRead, CanReadSelf)
+                        VALUES(:pid, :rid, :tbl, :cr, :cs)
+                    ELSE
+                        UPDATE Permissions
+                        SET CanRead=:cr, CanReadSelf=:cs
+                        WHERE ProjectID=:pid AND RoleID=:rid AND TableName=:tbl
+                """), {"pid": pid, "rid": rid, "tbl": p["table"], "cr": can_read, "cs": can_self})
+
+        return jsonify({"status": "ok", "message": "All changes saved atomically"})
+
     except Exception as e:
-        return jsonify({"error": str(e)})
+        return jsonify({"error": str(e)}), 500
 
-    schema = introspect_schema(engine)
-    tables = sorted({row["table"] for row in schema})
-
-    return jsonify({"ok": True, "tables": tables, "schema": schema})
-
-
-# ---------------- Serve UI ---------------- #
-@app.get("/")
-def index():
-    return send_from_directory(app.static_folder, "index.html")
-
-
+# --------- (Optional) run local ----------
 if __name__ == "__main__":
+    # POST_LOGOUT_REDIRECT_URI can be set; defaults to /login
     app.run(debug=True, port=5000)

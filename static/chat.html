@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>AI SQL Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0f1115;
+      --panel:#1c1f26;
+      --muted:#13161b;
+      --stroke:#2a2d34;
+      --text:#e6edf3;
+      --sub:#9aa1ab;
+      --accent:#10a37f;
+
+      /* table colors */
+      --tbl-bg:#181c22;
+      --tbl-header:#20252d;
+      --tbl-border:#2d333c;
+      --tbl-row:#1c222a;
+      --tbl-row-alt:#171c22;
+      --tbl-hover:#2a313c;
+    }
+
+    /* Page */
+    body{
+      margin:0;
+      background:var(--bg);
+      color:var(--text);
+      font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      height:100vh;
+      display:flex;
+      flex-direction:column;
+    }
+
+    /* Top bar */
+    .navbar{
+      padding:14px 22px;
+      background:var(--panel);
+      border-bottom:1px solid var(--stroke);
+      font-weight:700;
+      letter-spacing:-.2px;
+      display:flex;
+      align-items:center;
+      gap:12px;
+    }
+    .who{
+      margin-left:auto;
+      font-size:13px;
+      color:var(--sub);
+    }
+
+    /* Success banner */
+    .banner {
+      background:#0f5132;border:1px solid #0c4128;color:#d1e7dd;
+      margin:10px 18px 0 18px;padding:10px 14px;border-radius:8px;
+      display:none;align-items:center;gap:10px;justify-content:space-between;
+    }
+    .banner a { color:#a6e9c7; text-decoration:none; font-weight:700; }
+
+    /* Main layout */
+    .shell{
+      flex:1;
+      display:flex;
+      gap:18px;
+      padding:18px;
+      min-height:0;
+    }
+
+    /* Panels */
+    .panel{
+      background:var(--panel);
+      border:1px solid var(--stroke);
+      border-radius:12px;
+      box-shadow:0 8px 20px rgba(0,0,0,.35);
+    }
+
+    /* Sidebar */
+    .sidebar{
+      width:320px;
+      min-width:280px;
+      display:flex;
+      flex-direction:column;
+      padding:18px;
+      gap:12px;
+      overflow:auto;
+    }
+    .sidebar h3{
+      margin:0 0 10px 0;
+      font-size:18px;
+      font-weight:700;
+      border-bottom:1px solid var(--stroke);
+      padding-bottom:10px;
+    }
+
+    label, .lbl{font-size:13px;color:var(--sub)}
+    select,input,button{
+      border-radius:10px;
+      border:1px solid var(--stroke);
+      background:var(--muted);
+      color:var(--text);
+      padding:10px;
+      font-size:14px;
+    }
+    button{
+      background:var(--accent);
+      border:none;
+      font-weight:700;
+      cursor:pointer;
+      transition:.2s;
+    }
+    button:hover{filter:brightness(1.05)}
+
+    /* Tables area */
+    .tbl-actions{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin:8px 0 6px 0;
+    }
+    .tablebox{
+      max-height:260px;
+      overflow:auto;
+      background:var(--muted);
+      border:1px solid var(--stroke);
+      border-radius:10px;
+      padding:8px;
+    }
+    .tablebox .row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 4px;
+      border-bottom:1px dashed rgba(255,255,255,.04);
+      font-size:14px;
+    }
+
+    /* Chat area */
+    .chat{
+      flex:1;
+      display:flex;
+      min-width:0;
+      min-height:0;
+      padding:0;
+    }
+    .chat-inner{
+      display:flex;
+      flex-direction:column;
+      flex:1;
+      min-height:0;
+      padding:18px;
+      gap:12px;
+      width:100%;
+    }
+
+    #chat{
+      flex:1;
+      overflow:auto;
+      padding-right:6px;
+      border:1px solid var(--stroke);
+      background:#191d23;
+      border-radius:10px;
+      padding:12px;
+    }
+    .msg{
+      background:#1a1f27;
+      border:1px solid var(--stroke);
+      padding:12px;
+      border-radius:10px;
+      margin:10px 0;
+      line-height:1.55;
+      font-size:15px;
+    }
+
+    /* SQL box */
+    .sql{
+      margin-top:8px;
+      background:#11161c;
+      border:1px solid #273244;
+      border-radius:8px;
+      padding:10px;
+      white-space:pre-wrap;
+      font-family:Consolas,monospace;
+      font-size:13px;
+    }
+
+    /* Input bar */
+    .inputbar{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      margin-top:12px;
+    }
+    .inputbar input{
+      flex:1;
+      background:var(--muted);
+      border:1px solid var(--stroke);
+    }
+    .inputbar button{width:120px}
+
+    /* --------------------------------------- */
+    /*        RESULT TABLE (Enterprise)        */
+    /* --------------------------------------- */
+
+    .result-table-wrap {
+      overflow: auto;
+      max-width: 100%;
+      margin-top: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--tbl-border);
+      background: var(--tbl-bg);
+      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    }
+
+    .result-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    .result-table thead th {
+      background: var(--tbl-header);
+      padding: 12px 10px;
+      text-align: left;
+      font-weight: 600;
+      color: #d7dde6;
+      border-bottom: 1px solid var(--tbl-border);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    .result-table tbody tr {
+      border-bottom: 1px solid #242a32;
+      transition: background 0.15s ease;
+    }
+
+    .result-table tbody tr:nth-child(even) {
+      background: var(--tbl-row);
+    }
+
+    .result-table tbody tr:nth-child(odd) {
+      background: var(--tbl-row-alt);
+    }
+
+    .result-table tbody tr:hover {
+      background: var(--tbl-hover);
+    }
+
+    .result-table td {
+      padding: 10px 9px;
+      color: #d2d8e2;
+      max-width: 320px;
+      word-wrap: break-word;
+      line-height: 1.45;
+    }
+
+    .no-results {
+      padding:16px;
+      text-align:center;
+      color:#9aa1ab;
+      font-size:15px;
+    }
+
+    /* Responsive */
+    @media (max-width: 980px){
+      .shell{flex-direction:column}
+      .sidebar{width:100%; min-height:260px; }
+      .chat{height:calc(100vh - 460px)}
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <div class="navbar">
+    AI SQL Chat • Workspace
+    <div id="who" class="who"></div>
+  </div>
+
+  <!-- SUCCESS BANNER -->
+  <div id="loginBanner" class="banner">
+    <div id="loginBannerText">✔ Logged in successfully.</div>
+    <a href="/logout">Logout →</a>
+  </div>
+
+  <!-- MAIN -->
+  <div class="shell">
+
+    <!-- SIDEBAR -->
+    <div class="panel sidebar">
+      <h3>Project & Tables</h3>
+
+      <div class="lbl">Project</div>
+      <select id="project"></select>
+
+      <button id="loadBtn">Load Accessible Tables</button>
+
+      <div class="tbl-actions">
+        <input id="tableSearch" placeholder="Search tables…" style="flex:1;min-width:160px">
+        <button id="selectAllBtn" type="button" style="background:#2f7b68">Select All</button>
+        <button id="clearAllBtn" type="button" style="background:#39414d">Clear</button>
+      </div>
+
+      <div class="tablebox" id="tables"></div>
+    </div>
+
+    <!-- CHAT -->
+    <div class="panel chat">
+      <div class="chat-inner">
+
+        <div id="chat"></div>
+
+        <div class="inputbar">
+          <input id="q" placeholder="Send a message about your data…">
+          <button id="askBtn">Send</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+  let me=null, allowedTables=[], filteredTables=[];
+
+  const whoEl     = document.getElementById('who');
+  const projSel   = document.getElementById('project');
+  const tablesDiv = document.getElementById('tables');
+  const chatDiv   = document.getElementById('chat');
+  const qInput    = document.getElementById('q');
+
+  const tableSearch = document.getElementById('tableSearch');
+  const selectAllBtn= document.getElementById('selectAllBtn');
+  const clearAllBtn = document.getElementById('clearAllBtn');
+
+  function msg(html){
+    const d=document.createElement('div');
+    d.className='msg';
+    d.innerHTML=html;
+    chatDiv.appendChild(d);
+    chatDiv.scrollTop = chatDiv.scrollHeight;
+  }
+
+  async function boot(){
+    const r = await fetch('/api/me');
+    const data = await r.json();
+
+    me = data;
+    if (whoEl) whoEl.innerHTML = `Signed in as <b>${data.email}</b>`;
+
+    const banner = document.getElementById('loginBanner');
+    const btxt = document.getElementById('loginBannerText');
+    if (data.email) {
+      btxt.innerHTML = `✔ Logged in successfully as <b>${data.email}</b>`;
+      banner.style.display = 'flex';
+    }
+
+    projSel.innerHTML = (data.projects||[]).map(p =>
+      `<option value="${p.project}">${p.project} (${p.role})</option>`
+    ).join('');
+  }
+
+  function renderTables(list){
+    tablesDiv.innerHTML = list.length
+      ? list.map(t => `
+        <div class="row">
+          <input class="tblcb" type="checkbox" value="${t}" checked id="cb_${cssSafe(t)}">
+          <label for="cb_${cssSafe(t)}" style="cursor:pointer">${t}</label>
+        </div>`).join('')
+      : '<div class="lbl">No tables available</div>';
+  }
+
+  function cssSafe(s){ return String(s).replace(/[^a-zA-Z0-9_-]/g,'_'); }
+
+  async function loadTables(){
+    const p = projSel.value;
+    if(!p) return;
+
+    const r = await fetch(`/api/accessible-schema?project=${encodeURIComponent(p)}`);
+    const data = await r.json();
+    if(data.error){ alert(data.error); return; }
+
+    allowedTables = data.tables || [];
+    filteredTables = [...allowedTables];
+    renderTables(filteredTables);
+  }
+
+  function filterTables(){
+    const q = (tableSearch.value || '').toLowerCase().trim();
+    filteredTables = !q
+      ? [...allowedTables]
+      : allowedTables.filter(t => t.toLowerCase().includes(q));
+    renderTables(filteredTables);
+  }
+
+  function setAllTables(checked){
+    tablesDiv.querySelectorAll('.tblcb').forEach(cb => cb.checked = checked);
+  }
+
+  async function ask(){
+    const q = qInput.value.trim();
+    if(!q) return;
+
+    const selected = Array.from(tablesDiv.querySelectorAll('.tblcb:checked')).map(x=>x.value);
+    const project  = projSel.value;
+
+    msg(`<b>You</b><br>${escapeHtml(q)}`);
+
+    const thinking = document.createElement('div');
+    thinking.className='msg';
+    thinking.textContent='Thinking…';
+    chatDiv.appendChild(thinking);
+    chatDiv.scrollTop = chatDiv.scrollHeight;
+
+    try{
+      const r = await fetch('/api/chat', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({question:q, project, selectedTables:selected})
+      });
+      const data = await r.json();
+      thinking.remove();
+
+      if(data.error){
+        msg(`<b>Error</b><br>${escapeHtml(data.error)}${data.sql ? `<div class="sql">${escapeHtml(data.sql)}</div>`:''}`);
+        return;
+      }
+      if(data.table_html){
+        msg(`<b>Result</b><br>${data.table_html}`);
+      }
+      if(data.summary){
+        msg(`${escapeHtml(data.summary).replace(/\n/g,'<br>')}`);
+      }
+      if(data.sql){
+        const id = 'sql_' + Math.random().toString(36).slice(2);
+        msg(
+          `<b>SQL</b>
+           <div>
+             <button data-target="${id}" class="toggle-sql" style="margin-top:6px;background:#39414d">Show SQL</button>
+             <div id="${id}" class="sql" style="display:none">${escapeHtml(data.sql)}</div>
+           </div>`
+        );
+        const toggles = chatDiv.querySelectorAll('.toggle-sql');
+        const btn = toggles[toggles.length - 1];
+        btn.onclick = () => {
+          const box = document.getElementById(btn.dataset.target);
+          const open = box.style.display !== 'none';
+          box.style.display = open ? 'none' : 'block';
+          btn.textContent = open ? 'Show SQL' : 'Hide SQL';
+        };
+      }
+    }catch(e){
+      thinking.remove();
+      msg(`<b>Error</b><br>Request failed.`);
+    }finally{
+      qInput.value='';
+      qInput.focus();
+    }
+  }
+
+  function escapeHtml(s){
+    return String(s)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;');
+  }
+
+  // Events
+  document.getElementById('loadBtn').onclick = loadTables;
+  document.getElementById('askBtn').onclick  = ask;
+  qInput.addEventListener('keydown', e => {
+    if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); ask(); }
+  });
+
+  tableSearch.addEventListener('input', filterTables);
+  selectAllBtn.onclick = ()=> setAllTables(true);
+  clearAllBtn.onclick  = ()=> setAllTables(false);
+
+  boot();
+</script>
+</body>
+</html>

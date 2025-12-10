@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Home • AI SQL Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Inter, system-ui;
+      background: #0f1115;
+      color: #e6edf3;
+    }
+
+    /* Top Navigation */
+    .navbar {
+      background: #1c1f26;
+      padding: 16px 32px;
+      font-size: 18px;
+      font-weight: 600;
+      border-bottom: 1px solid #272a31;
+      letter-spacing: -0.3px;
+    }
+
+    /* Main Container */
+    .container {
+      max-width: 900px;
+      margin: 60px auto;
+      padding: 0 20px;
+    }
+
+    .title {
+      font-size: 32px;
+      font-weight: 800;
+      margin-bottom: 8px;
+      color: #ffffff;
+    }
+
+    .subtitle {
+      font-size: 15px;
+      color: #9aa1ab;
+      margin-bottom: 40px;
+    }
+
+    /* Grid Cards */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+
+    .card {
+      background: #1c1f26;
+      padding: 22px;
+      border-radius: 10px;
+      border: 1px solid #2a2d34;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: 0.25s ease;
+    }
+
+    .card:hover {
+      background: #252932;
+      transform: translateX(4px);
+    }
+
+    .card-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    .card-link {
+      text-decoration: none;
+      color: #10a37f;
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    /* Logout */
+    .logout {
+      margin-top: 30px;
+      display: inline-block;
+      color: #ff6666;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    .logout:hover {
+      color: #ff4b4b;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="navbar">AI SQL Chat • Dashboard</div>
+
+  <div class="container">
+
+    <div class="title">Welcome, {{name}}</div>
+    <div class="subtitle">Your workspace is ready — what would you like to do?</div>
+
+    <div class="grid">
+
+      <div class="card">
+        <div class="card-title">Open AI SQL Chatbot</div>
+        <a href="/chatui" class="card-link">Open →</a>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Admin Panel</div>
+        <a href="/admin" class="card-link">Access →</a>
+      </div>
+
+    </div>
+
+    <a href="/logout" class="logout">Logout</a>
+
+  </div>
+
+</body>
+</html>

@@ -403,6 +403,11 @@
     if(!q) return;
 
     const selected = Array.from(tablesDiv.querySelectorAll('.tblcb:checked')).map(x=>x.value);
+    if(selected.length === 0){
+  msg(`<b>⚠ Please select at least one table</b><br>
+       Select the tables first, then ask your question.`);
+  return;
+}
     const project  = projSel.value;
 
     msg(`<b>You</b><br>${escapeHtml(q)}`);

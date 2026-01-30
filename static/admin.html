@@ -1,450 +1,599 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>RBAC Admin Panel</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    :root{
-      --bg:#0f1115; --panel:#141821; --muted:#0e1218; --stroke:#222636;
-      --text:#e6edf3; --sub:#9aa1ab; --accent:#10a37f; --accent-2:#2a7b67;
-      --danger:#e5534b; --warn:#e6a700; --ok:#3fbf75;
-      --tbl-header:#1b202a; --tbl-bg:#121621; --tbl-border:#252b39; --hover:#1d2330;
-      --input:#0f1420; --ring:#2a7b67;
-    }
-    *{box-sizing:border-box}
-    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui}
+<meta charset="UTF-8">
+<title>RBAC Admin Panel</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
-    .navbar{position:sticky;top:0;z-index:10;background:rgba(20,24,33,.8);backdrop-filter:blur(8px);
-      padding:16px 22px;border-bottom:1px solid var(--stroke);display:flex;gap:12px;align-items:center}
-    .brand{font-weight:800;letter-spacing:-.2px}
-    .navright{margin-left:auto;font-size:13px;color:var(--sub)}
+<style>
 
-    .wrap{max-width:1100px;margin:28px auto;padding:0 18px}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
-    @media (max-width:980px){ .grid{grid-template-columns:1fr} }
+/* =============================== */
+/*          GLOBAL STYLE           */
+/* =============================== */
 
-    .panel{background:var(--panel);border:1px solid var(--stroke);border-radius:14px;padding:18px 18px 16px;
-      box-shadow:0 20px 50px rgba(0,0,0,.35)}
-    .panel h3{margin:0 0 12px;font-size:18px}
-    .section-title{margin:12px 0 6px;font-weight:700;color:#d7dde6}
+:root{
+  --bg:#0e1013;
+  --card:#15181f;
+  --border:#22252f;
+  --text:#e6edf3;
+  --sub:#9aa1ab;
+  --accent:#10a37f;
+  --accent-dark:#0c8c6d;
+  --hover:#1c2028;
+  --danger:#e25555;
+}
 
-    .row{display:flex;gap:12px;flex-wrap:wrap}
-    .row > *{flex:1 1 260px}
+*{
+  margin:0;
+  padding:0;
+  box-sizing:border-box;
+  font-family:Inter,system-ui,sans-serif;
+}
 
-    label{display:block;font-size:12px;color:var(--sub);margin:4px 0 6px}
-    input,select,button{border-radius:12px;border:1px solid var(--stroke);background:var(--input);
-      color:var(--text);padding:10px 12px;font-size:14px;outline:none;transition:border .15s, box-shadow .15s}
-    input:focus,select:focus{border-color:var(--ring);box-shadow:0 0 0 3px rgba(42,123,103,.25)}
-    input[disabled],select[disabled],button[disabled]{opacity:.6;cursor:not-allowed}
+body{
+  background:var(--bg);
+  color:var(--text);
+  padding-bottom:50px;
+}
 
-    .btn{background:var(--accent);border:none;font-weight:700;cursor:pointer}
-    .btn:hover{filter:brightness(1.05)}
-    .btn.secondary{background:#39414d}
+.navbar{
+  background:#12151a;
+  padding:16px 24px;
+  display:flex;
+  align-items:center;
+  border-bottom:1px solid var(--border);
+  position:sticky;
+  top:0;
+  z-index:20;
+}
+.brand{
+  font-size:20px;
+  font-weight:700;
+}
+.nav-user{
+  margin-left:auto;
+  color:var(--sub);
+}
 
-    .box{background:var(--muted);border:1px solid var(--stroke);border-radius:12px;padding:10px;max-height:260px;overflow:auto}
-    .item{display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px dashed rgba(255,255,255,.06)}
-    .item:last-child{border-bottom:none}
-    .item:hover{background:var(--hover);border-radius:8px}
+.container{
+  max-width:1050px;
+  margin:32px auto;
+  padding:0 16px;
+}
 
-    table{width:100%;border-collapse:collapse;background:var(--tbl-bg);border-radius:12px;overflow:hidden}
-    th{background:var(--tbl-header);text-align:left;border-bottom:1px solid var(--tbl-border);padding:12px;font-weight:600;color:#d7dde6}
-    td{padding:12px;border-bottom:1px solid var(--tbl-border)}
-    tr:nth-child(even){background:#151a25}
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:24px;
+  margin-bottom:28px;
+}
 
-    .tag{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--stroke);background:#1b2130;display:inline-block}
-    .muted{color:var(--sub);font-size:12px}
+.card-title{
+  font-size:20px;
+  font-weight:700;
+  margin-bottom:6px;
+}
+.card-sub{
+  color:var(--sub);
+  font-size:14px;
+  margin-bottom:20px;
+}
 
-    .toast{position:fixed;right:18px;bottom:18px;display:none;min-width:280px;padding:12px 14px;border-radius:12px;
-      border:1px solid #2a2d34;background:#18211c;color:#d0f0df;font-weight:600;box-shadow:0 10px 30px rgba(0,0,0,.35)}
-    .toast.error{background:#2a1717;color:#ffd9d7}
-    .toast.warn{background:#2a2417;color:#ffe7b3}
-  </style>
+.section{
+  margin-bottom:32px;
+}
+.section-title{
+  font-size:16px;
+  margin-bottom:10px;
+  font-weight:600;
+}
+.section-sub{
+  font-size:13px;
+  color:var(--sub);
+  margin-bottom:14px;
+}
+
+.form-row{
+  display:flex;
+  gap:20px;
+  flex-wrap:wrap;
+}
+
+.form-field{
+  flex:1;
+  min-width:260px;
+}
+
+label{
+  font-size:13px;
+  color:var(--sub);
+  margin-bottom:6px;
+  display:block;
+}
+label span{
+  color:var(--danger);
+}
+
+input, select{
+  width:100%;
+  padding:10px 12px;
+  background:#0f1117;
+  color:var(--text);
+  border:1px solid var(--border);
+  border-radius:10px;
+  outline:none;
+  font-size:14px;
+}
+input:focus, select:focus{
+  border-color:var(--accent);
+}
+
+hr{
+  border:none;
+  border-top:1px solid var(--border);
+  margin:24px 0;
+}
+
+/* PROJECT CHECKBOXES */
+.project-checkbox-list{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+}
+.project-checkbox{
+  padding:10px 14px;
+  background:#1a1d24;
+  border:1px solid var(--border);
+  border-radius:10px;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.project-checkbox input{
+  width:auto;
+}
+
+/* PERMISSIONS */
+.perm-section{
+  margin-bottom:22px;
+  background:#1a1d24;
+  padding:16px;
+  border-radius:12px;
+  border:1px solid var(--border);
+}
+.perm-title{
+  font-size:15px;
+  font-weight:600;
+  margin-bottom:10px;
+}
+.perm-table{
+  width:100%;
+  border-collapse:collapse;
+}
+.perm-table th{
+  text-align:left;
+  padding:8px;
+  color:var(--sub);
+  border-bottom:1px solid var(--border);
+}
+.perm-table td{
+  padding:8px;
+  border-bottom:1px solid var(--border);
+}
+
+/* PERMISSION BUTTONS */
+.perm-actions{
+  display:flex;
+  gap:10px;
+  margin-bottom:12px;
+}
+
+.perm-btn{
+  padding:6px 12px;
+  background:#1f242c;
+  border:1px solid var(--border);
+  color:var(--text);
+  border-radius:8px;
+  cursor:pointer;
+  font-size:13px;
+}
+.perm-btn:hover{
+  background:#232833;
+}
+
+.perm-btn.danger{
+  background:#2a1616;
+  border-color:#522;
+  color:#ffdddd;
+}
+.perm-btn.danger:hover{
+  background:#3c1d1d;
+}
+
+/* SAVE BUTTON */
+.primary-btn{
+  padding:12px 26px;
+  background:var(--accent);
+  border:none;
+  color:white;
+  font-size:15px;
+  font-weight:700;
+  border-radius:10px;
+  cursor:pointer;
+}
+.primary-btn:hover{
+  background:var(--accent-dark);
+}
+
+/* SNAPSHOT */
+.stats-table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:10px;
+}
+.stats-table th{
+  background:#1d2129;
+  padding:10px;
+  text-align:left;
+  border-bottom:1px solid var(--border);
+}
+.stats-table td{
+  padding:10px;
+  border-bottom:1px solid var(--border);
+}
+
+/* TOAST */
+.toast{
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 14px 22px;
+  background:#18211c;
+  color:#d7f7e9;
+  border:1px solid #245f4c;
+  border-radius:10px;
+  display:none;
+  font-weight:600;
+  z-index:9999;
+  min-width:280px;
+  text-align:center;
+  box-shadow:0 8px 25px rgba(0,0,0,0.4);
+  animation: fadeSlide 0.3s ease-out;
+}
+
+.toast.error{
+  background:#2a1616;
+  color:#ffd2d2;
+  border-color:#733;
+}
+
+@keyframes fadeSlide {
+  from { opacity:0; transform:translate(-50%, -10px); }
+  to { opacity:1; transform:translate(-50%, 0); }
+}
+
+</style>
 </head>
+
+
 <body>
-  <div class="navbar">
-    <div class="brand">RBAC Admin Panel</div>
-    <div class="navright">Manage users, roles & access</div>
+
+<div class="navbar">
+  <div class="brand">RBAC Admin</div>
+  <div class="nav-user">Admin Panel</div>
+</div>
+
+<div class="container">
+
+  <!-- MAIN FORM -->
+  <form id="adminForm" class="card">
+
+    <h2 class="card-title">Add User & Assign Access</h2>
+    <p class="card-sub">Fill all fields, then save. Everything is written in a single atomic transaction.</p>
+
+    <!-- USER INFO -->
+    <section class="section">
+      <h3 class="section-title">User Information</h3>
+
+      <div class="form-row">
+        <div class="form-field">
+          <label>Email <span>*</span></label>
+          <input id="userEmail" type="email" required>
+        </div>
+        <div class="form-field">
+          <label>Full Name <span>*</span></label>
+          <input id="userName" type="text" required>
+        </div>
+      </div>
+    </section>
+
+    <hr>
+
+    <!-- PROJECT SELECTION -->
+    <section class="section">
+      <h3 class="section-title">Select Projects (Max 2)</h3>
+      <div id="projectList" class="project-checkbox-list"></div>
+    </section>
+
+    <hr>
+
+    <!-- ROLE -->
+    <section class="section">
+      <h3 class="section-title">Select Role</h3>
+      <select id="roleSelect"></select>
+    </section>
+
+    <hr>
+
+    <!-- PERMISSIONS -->
+    <section class="section">
+      <h3 class="section-title">Table Permissions</h3>
+      <div id="permissionsContainer"></div>
+    </section>
+
+    <hr>
+
+    <section class="section" style="text-align:center;">
+      <button id="saveBtn" type="submit" class="primary-btn">Save User Access</button>
+    </section>
+
+  </form>
+
+  <!-- SNAPSHOT -->
+  <div class="card">
+    <h2 class="card-title">System Snapshot</h2>
+    <table class="stats-table">
+      <thead>
+        <tr>
+          <th>Users</th>
+          <th>Projects</th>
+          <th>Roles</th>
+          <th>Tables</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td id="snapUsers">—</td>
+          <td id="snapProjects">—</td>
+          <td id="snapRoles">—</td>
+          <td id="snapTables">—</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 
-  <div class="wrap">
-    <div class="grid">
+</div>
 
-      <!-- ADD USER (queues ONE pending user only) -->
-      <div class="panel">
-        <h3>Add User (Queued, not saved)</h3>
-        <div class="row">
-          <div>
-            <label for="uEmail">Email</label>
-            <input id="uEmail" placeholder="email@company.com" autocomplete="off" />
-          </div>
-          <div>
-            <label for="uName">Full name</label>
-            <input id="uName" placeholder="Full name" autocomplete="off" />
-          </div>
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button id="queueUserBtn" class="btn" disabled>Queue This User</button>
-          <button id="resetUserBtn" class="btn secondary" type="button">Reset</button>
-        </div>
-        <div id="pendingUserBadge" class="muted" style="margin-top:8px">No user queued.</div>
-      </div>
-
-      <!-- GRANT ROLE TO PENDING USER -->
-      <div class="panel">
-        <h3>Grant Role (applies to queued user)</h3>
-        <div class="row">
-          <div>
-            <label for="gProject">Project</label>
-            <select id="gProject"></select>
-          </div>
-          <div>
-            <label for="gRole">Role</label>
-            <select id="gRole"></select>
-          </div>
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button id="queueGrantBtn" class="btn" disabled>Queue Role Grant</button>
-          <button id="clearGrantsBtn" class="btn secondary" type="button">Clear Grants</button>
-        </div>
-        <div class="section-title">Pending Grants</div>
-        <div id="grantsBox" class="box">
-          <div class="muted">No role grants queued.</div>
-        </div>
-      </div>
-
-      <!-- PERMISSIONS (ROLE-BASED) -->
-      <div class="panel" style="grid-column:1/-1">
-        <h3>Set Table Permissions (Role-based, queued)</h3>
-
-        <div class="section-title">Projects (select multiple)</div>
-        <div class="box" id="projBox"></div>
-
-        <div class="section-title">Role</div>
-        <div class="row"><select id="pRole"></select></div>
-
-        <div class="section-title">Tables (per selected project)</div>
-        <div id="tablesMultiBox" class="row" style="gap:16px"></div>
-
-        <div class="row" style="margin-top:6px">
-          <label class="muted"><input type="checkbox" id="pRead" style="transform:translateY(1px);margin-right:6px"> Can Read</label>
-          <label class="muted"><input type="checkbox" id="pSelf" style="transform:translateY(1px);margin-right:6px"> Self-Only Read</label>
-        </div>
-
-        <div class="row" style="margin-top:12px">
-          <button id="queuePermBtn" class="btn" disabled>Queue Permissions</button>
-          <button id="clearPermsBtn" class="btn secondary" type="button">Clear Queued Permissions</button>
-        </div>
-
-        <div class="section-title">Queued Permissions Summary</div>
-        <div id="permsSummary" class="box">
-          <div class="muted">No permissions queued.</div>
-        </div>
-      </div>
-
-      <!-- GLOBAL SAVE ALL CHANGES -->
-      <div class="panel" style="grid-column:1/-1; text-align:center;">
-        <button id="saveAllBtn" class="btn" style="padding:14px 26px; font-size:16px;" disabled>
-          Save All Changes
-        </button>
-        <div class="muted" style="margin-top:6px">
-          Saves the queued user, their role grants, and any role-based permissions in ONE atomic commit.
-        </div>
-      </div>
-
-      <!-- SNAPSHOT -->
-      <div class="panel" style="grid-column:1/-1">
-        <h3>System Snapshot</h3>
-        <table>
-          <thead>
-            <tr><th>Users</th><th>Projects</th><th>Roles</th><th>Tables</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td id="snapUsers">—</td>
-              <td id="snapProjects">—</td>
-              <td id="snapRoles">—</td>
-              <td id="snapTables">—</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-    </div>
-  </div>
-
-  <div id="toast" class="toast"></div>
+<div id="toast" class="toast"></div>
 
 <script>
-  // ======= STATE =======
-  const pending = { user: null, grants: [], permissions: [] };
-  let bootstrap = null;
-  let selectedProjects = new Set();
-  let tablesByProject = {};
 
-  // ======= UI HELPERS =======
-  const toastEl = document.getElementById('toast');
-  function toast(msg, type='ok'){
-    toastEl.textContent = msg;
-    toastEl.className = 'toast' + (type==='error' ? ' error' : type==='warn' ? ' warn' : '');
-    toastEl.style.display = 'block';
-    setTimeout(()=> toastEl.style.display='none', 2600);
+/* ==================================================== */
+/*                    GLOBAL STATE                       */
+/* ==================================================== */
+
+let bootstrap = null;
+let selectedProjects = new Set();
+let tablesByProject = {};
+
+function toast(msg, type="ok"){
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = "toast" + (type==="error" ? " error" : "");
+  t.style.display = "block";
+  setTimeout(()=> t.style.display = "none", 2500);
+}
+
+/* ==================================================== */
+/*                      LOAD DATA                        */
+/* ==================================================== */
+
+async function loadBootstrap(){
+  const res = await fetch("/api/admin/bootstrap");
+  bootstrap = await res.json();
+
+  document.getElementById("snapUsers").textContent = bootstrap.users.length;
+  document.getElementById("snapProjects").textContent = bootstrap.projects.length;
+  document.getElementById("snapRoles").textContent = bootstrap.roles.length;
+  document.getElementById("snapTables").textContent = bootstrap.tables.length;
+
+  document.getElementById("roleSelect").innerHTML =
+    bootstrap.roles.map(r => `<option>${r.RoleName}</option>`).join("");
+
+  const projectList = document.getElementById("projectList");
+  projectList.innerHTML = bootstrap.projects.map(p => `
+    <label class="project-checkbox">
+      <input type="checkbox" value="${p.ProjectName}" onclick="toggleProject(this)">
+      ${p.ProjectName}
+    </label>
+  `).join("");
+
+  tablesByProject = {};
+  bootstrap.projects.forEach(p => {
+    tablesByProject[p.ProjectName] =
+      bootstrap.tables
+        .filter(t => t.ProjectName === p.ProjectName)
+        .map(t => t.TableName);
+  });
+}
+
+/* ==================================================== */
+/*              PROJECT SELECTION LOGIC                 */
+/* ==================================================== */
+
+function toggleProject(cb){
+  if(cb.checked){
+    if(selectedProjects.size === 2){
+      cb.checked = false;
+      toast("You can select only 2 projects.", "error");
+      return;
+    }
+    selectedProjects.add(cb.value);
+  } else {
+    selectedProjects.delete(cb.value);
   }
-  function cssSafe(s){ return String(s).replace(/[^a-zA-Z0-9_-]/g,'_'); }
+  renderPermissionSections();
+}
 
-  const uEmail = document.getElementById('uEmail');
-  const uName  = document.getElementById('uName');
-  const queueUserBtn = document.getElementById('queueUserBtn');
-  const resetUserBtn = document.getElementById('resetUserBtn');
-  const pendingUserBadge = document.getElementById('pendingUserBadge');
+/* ==================================================== */
+/*              PERMISSION SECTIONS UI                  */
+/* ==================================================== */
 
-  const gProject = document.getElementById('gProject');
-  const gRole    = document.getElementById('gRole');
-  const queueGrantBtn = document.getElementById('queueGrantBtn');
-  const clearGrantsBtn = document.getElementById('clearGrantsBtn');
-  const grantsBox = document.getElementById('grantsBox');
+function renderPermissionSections(){
+  const container = document.getElementById("permissionsContainer");
+  container.innerHTML = "";
 
-  const pRole = document.getElementById('pRole');
-  const pRead = document.getElementById('pRead');
-  const pSelf = document.getElementById('pSelf');
-  const queuePermBtn = document.getElementById('queuePermBtn');
-  const clearPermsBtn = document.getElementById('clearPermsBtn');
-  const projBox = document.getElementById('projBox');
-  const tablesMultiBox = document.getElementById('tablesMultiBox');
-  const permsSummary = document.getElementById('permsSummary');
+  [...selectedProjects].forEach(project => {
+    const tables = tablesByProject[project] || [];
 
-  const saveAllBtn = document.getElementById('saveAllBtn');
+    const section = document.createElement("div");
+    section.className = "perm-section";
 
-  // ======= ENABLE/DISABLE CONTROLS =======
-  function enableQueueUserIfReady(){
-    const email = uEmail.value.trim();
-    const name  = uName.value.trim();
-    const validEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
-    queueUserBtn.disabled = !(validEmail && name && !pending.user);
-  }
+    section.innerHTML = `
+      <div class="perm-title">${project}</div>
 
-  function refreshActionButtons(){
-    queueGrantBtn.disabled = !pending.user;
-    queuePermBtn.disabled = !(selectedProjects.size > 0 && (pRead.checked || pSelf.checked));
-    saveAllBtn.disabled = !pending.user; // require at least a user to save
-  }
-
-  // ======= LOAD BOOTSTRAP =======
-  async function load(){
-    const r = await fetch('/api/admin/bootstrap');
-    bootstrap = await r.json();
-
-    // Fill selects
-    pRole.innerHTML    = bootstrap.roles.map(r=>`<option>${r.RoleName}</option>`).join('');
-    gProject.innerHTML = bootstrap.projects.map(p=>`<option>${p.ProjectName}</option>`).join('');
-    gRole.innerHTML    = bootstrap.roles.map(r=>`<option>${r.RoleName}</option>`).join('');
-
-    // Snapshot
-    snapUsers.textContent    = bootstrap.users.length;
-    snapProjects.textContent = bootstrap.projects.length;
-    snapRoles.textContent    = bootstrap.roles.length;
-    snapTables.textContent   = bootstrap.tables.length;
-
-    // Tables by project
-    tablesByProject = bootstrap.projects.reduce((acc,p)=>{
-      acc[p.ProjectName] = bootstrap.tables.filter(t=>t.ProjectName===p.ProjectName).map(t=>t.TableName);
-      return acc;
-    }, {});
-
-    // Projects checklist
-    projBox.innerHTML = bootstrap.projects.map(p=>`
-      <div class="item">
-        <input class="projcb" type="checkbox" value="${p.ProjectName}" id="p_${cssSafe(p.ProjectName)}">
-        <label for="p_${cssSafe(p.ProjectName)}">${p.ProjectName}</label>
+      <div class="perm-actions">
+        <button type="button" class="perm-btn" onclick="selectAllRead('${project}')">Select All Read</button>
+        <button type="button" class="perm-btn" onclick="selectAllSelf('${project}')">Select All Self</button>
+        <button type="button" class="perm-btn danger" onclick="clearAllPerms('${project}')">Clear All</button>
       </div>
-    `).join('');
-    projBox.querySelectorAll('.projcb').forEach(cb=>{
-      cb.addEventListener('change', ()=>{
-        if(cb.checked) selectedProjects.add(cb.value); else selectedProjects.delete(cb.value);
-        renderTablesSections();
-        refreshActionButtons();
+
+      <table class="perm-table">
+        <thead>
+          <tr>
+            <th>Table</th>
+            <th>Can Read</th>
+            <th>Self-Only</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tables.map(t => `
+            <tr>
+              <td>${t}</td>
+              <td><input type="checkbox" class="perm-read" data-project="${project}" data-table="${t}"></td>
+              <td><input type="checkbox" class="perm-self" data-project="${project}" data-table="${t}"></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    `;
+
+    container.appendChild(section);
+  });
+}
+
+/* ==================================================== */
+/*         SELECT ALL / CLEAR PERMISSION BUTTONS        */
+/* ==================================================== */
+
+function selectAllRead(project){
+  document.querySelectorAll(`.perm-read[data-project="${project}"]`)
+    .forEach(cb => cb.checked = true);
+}
+
+function selectAllSelf(project){
+  document.querySelectorAll(`.perm-self[data-project="${project}"]`)
+    .forEach(cb => cb.checked = true);
+}
+
+function clearAllPerms(project){
+  document.querySelectorAll(`.perm-read[data-project="${project}"]`)
+    .forEach(cb => cb.checked = false);
+
+  document.querySelectorAll(`.perm-self[data-project="${project}"]`)
+    .forEach(cb => cb.checked = false);
+}
+
+/* ==================================================== */
+/*                   SAVE FINAL FORM                    */
+/* ==================================================== */
+
+document.getElementById("adminForm").onsubmit = async (e)=>{
+  e.preventDefault();
+
+  const email = document.getElementById("userEmail").value.trim();
+  const name  = document.getElementById("userName").value.trim();
+  const role  = document.getElementById("roleSelect").value;
+
+  if(!email.endsWith("@ariqt.com")){
+    toast("Email must be an @ariqt.com address.", "error");
+    return;
+  }
+
+  if(!email || !name){
+    toast("Please fill all required fields.", "error");
+    return;
+  }
+
+  if(selectedProjects.size === 0){
+    toast("Select at least 1 project.", "error");
+    return;
+  }
+
+  if(selectedProjects.size > 2){
+    toast("You can select only 1 or 2 projects.", "error");
+    return;
+  }
+
+  const grants = [...selectedProjects].map(p => ({
+    project:p,
+    role:role
+  }));
+
+  const permissions = [];
+  document.querySelectorAll(".perm-read").forEach(chk => {
+    const project = chk.dataset.project;
+    const table = chk.dataset.table;
+    const canRead = chk.checked;
+    const canSelf =
+      document.querySelector(`.perm-self[data-project="${project}"][data-table="${table}"]`).checked;
+
+    if(canRead || canSelf){
+      permissions.push({
+        role: role,
+        project: project,
+        table: table,
+        canRead: canRead,
+        canReadSelf: canSelf
       });
-    });
-
-    enableQueueUserIfReady();
-    refreshActionButtons();
-  }
-
-  // ======= RENDER TABLES =======
-  function renderTablesSections(){
-    const host = tablesMultiBox;
-    host.innerHTML = '';
-    if(selectedProjects.size === 0){
-      host.innerHTML = `<div class="muted" style="padding:10px">Select one or more projects to see their tables.</div>`;
-      return;
     }
-    [...selectedProjects].forEach(project=>{
-      const tables = tablesByProject[project] || [];
-      const section = document.createElement('div');
-      section.style.flex = '1 1 340px';
-      section.innerHTML = `
-        <div class="section-title">${project}</div>
-        <div class="box">
-          ${tables.length ? tables.map(t=>`
-            <div class="item">
-              <input class="tablecb" type="checkbox" value="${project}:::${t}" id="t_${cssSafe(project)}_${cssSafe(t)}" checked>
-              <label for="t_${cssSafe(project)}_${cssSafe(t)}">${t}</label>
-            </div>
-          `).join('') : `<div class="muted">No tables registered.</div>`}
-        </div>`;
-      host.appendChild(section);
-    });
-  }
-
-  // ======= QUEUE: USER =======
-  uEmail.addEventListener('input', enableQueueUserIfReady);
-  uName.addEventListener('input', enableQueueUserIfReady);
-
-  resetUserBtn.onclick = ()=>{
-    if(pending.user){ toast('Clear the pending user by saving or reloading.', 'warn'); return; }
-    uEmail.value=''; uName.value=''; enableQueueUserIfReady();
-  };
-
-  queueUserBtn.onclick = ()=>{
-    const email = uEmail.value.trim();
-    const name  = uName.value.trim();
-    const validEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
-    if(!(validEmail && name)){ toast('Please fill the required fields.', 'warn'); return; }
-    if(pending.user){ toast('A user is already queued. Save first to add another.', 'warn'); return; }
-
-    pending.user = { email, name };
-    pendingUserBadge.innerHTML = `Queued: <span class="tag">${email}</span> — ${name}`;
-    enableQueueUserIfReady();
-    refreshActionButtons();
-  };
-
-  // ======= QUEUE: ROLE GRANTS (for queued user) =======
-  queueGrantBtn.onclick = ()=>{
-    if(!pending.user){ toast('Please queue a user first.', 'warn'); return; }
-    const project = gProject.value;
-    const role    = gRole.value;
-    if(!(project && role)){ toast('Please fill the required fields.', 'warn'); return; }
-
-    // prevent duplicate grant for same (project, role)
-    if(pending.grants.some(g => g.project===project && g.role===role)){
-      toast('Grant already queued for this project & role.', 'warn'); return;
-    }
-    pending.grants.push({ project, role });
-    renderGrants();
-  };
-
-  function renderGrants(){
-    if(pending.grants.length === 0){
-      grantsBox.innerHTML = '<div class="muted">No role grants queued.</div>';
-      return;
-    }
-    grantsBox.innerHTML = pending.grants.map((g,idx)=>`
-      <div class="item">
-        <div class="tag">${g.project}</div>
-        <div>${g.role}</div>
-        <div style="margin-left:auto">
-          <button class="btn secondary" type="button" onclick="removeGrant(${idx})">Remove</button>
-        </div>
-      </div>
-    `).join('');
-  }
-  window.removeGrant = (idx)=>{
-    pending.grants.splice(idx,1);
-    renderGrants();
-  };
-  clearGrantsBtn.onclick = ()=>{
-    pending.grants = [];
-    renderGrants();
-  };
-
-  // ======= QUEUE: ROLE-BASED PERMISSIONS =======
-  ;['change','input'].forEach(evt=>{
-    pRole.addEventListener(evt, refreshActionButtons);
-    pRead.addEventListener(evt, refreshActionButtons);
-    pSelf.addEventListener(evt, refreshActionButtons);
   });
 
-  queuePermBtn.onclick = ()=>{
-    const role = pRole.value;
-    const canRead = pRead.checked;
-    const canSelf = pSelf.checked;
-    const pairs = Array.from(document.querySelectorAll('#tablesMultiBox input.tablecb:checked'))
-      .map(cb => {
-        const [project, table] = cb.value.split(':::');
-        return { project, table };
-      });
-
-    if(!(role && (canRead || canSelf) && pairs.length)){
-      toast('Please fill the required fields.', 'warn'); return;
-    }
-
-    // push all selected pairs (dedupe)
-    pairs.forEach(pr=>{
-      const exists = pending.permissions.some(x =>
-        x.role===role && x.project===pr.project && x.table===pr.table);
-      if(!exists){
-        pending.permissions.push({
-          role, project: pr.project, table: pr.table,
-          canRead, canReadSelf: canSelf
-        });
-      }
-    });
-    renderPermsSummary();
+  const payload = {
+    user: { email, name },
+    grants,
+    permissions
   };
 
-  function renderPermsSummary(){
-    if(pending.permissions.length===0){
-      permsSummary.innerHTML = '<div class="muted">No permissions queued.</div>';
-      return;
-    }
-    const rows = pending.permissions.map((p,idx)=>`
-      <div class="item">
-        <div class="tag">${p.role}</div>
-        <div class="tag">${p.project}</div>
-        <div style="min-width:160px">${p.table}</div>
-        <div class="muted">Read: ${p.canRead ? 'Yes':'No'} | Self: ${p.canReadSelf?'Yes':'No'}</div>
-        <div style="margin-left:auto">
-          <button class="btn secondary" type="button" onclick="removePerm(${idx})">Remove</button>
-        </div>
-      </div>
-    `).join('');
-    permsSummary.innerHTML = rows;
+  const res = await fetch("/api/admin/save-all", {
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await res.json();
+
+  if(!res.ok){
+    toast(data.error || "Save failed", "error");
+  } else {
+    toast("Saved successfully");
+    document.getElementById("adminForm").reset();
+    selectedProjects.clear();
+    renderPermissionSections();
+    loadBootstrap();
   }
-  window.removePerm = (idx)=>{
-    pending.permissions.splice(idx,1);
-    renderPermsSummary();
-  };
-  clearPermsBtn.onclick = ()=>{
-    pending.permissions = [];
-    renderPermsSummary();
-  };
+};
 
-  // ======= SAVE ALL (atomic) =======
-  saveAllBtn.onclick = async ()=>{
-    if(!pending.user){ toast('Please fill the required fields.', 'warn'); return; }
-    const payload = JSON.stringify(pending);
+/* ==================================================== */
+/*                     INIT LOAD                        */
+/* ==================================================== */
 
-    const r = await fetch('/api/admin/save-all', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body: payload
-    });
-    const d = await r.json();
+loadBootstrap();
 
-    if(!r.ok){ toast(d.error || 'Failed to save all changes', 'error'); return; }
-
-    toast('Saved successfully.', 'ok');
-
-    // reset all pending & UI
-    pending.user = null; pending.grants = []; pending.permissions = [];
-    uEmail.value=''; uName.value='';
-    pendingUserBadge.textContent = 'No user queued.';
-    renderGrants(); renderPermsSummary();
-    enableQueueUserIfReady(); refreshActionButtons();
-    // Optional: reload snapshot
-    try{ await load(); }catch(e){}
-  };
-
-  // ======= INIT =======
-  load();
 </script>
+
 </body>
 </html>

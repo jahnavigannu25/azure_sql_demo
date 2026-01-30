@@ -362,7 +362,9 @@ def api_chat():
     insp = inspect(engine)
 
     if not selected_tables:
-        selected_tables = [t for t,(cr,cs) in perm_map.items() if cr or cs]
+        return jsonify({
+            "error": "⚠ Please select at least one table before asking your question."
+        }), 400
 
     schema_rows = []
     for t in insp.get_table_names():
@@ -431,12 +433,19 @@ USER QUESTION:
             n = n.split(".")[-1]
         return n
     refs = {clean_name(x) for x in refs}
+    if not refs and selected_tables:
+        return jsonify({
+            "error": "Your question does not match any of the selected tables. Please rephrase or select the correct tables."
+        }), 400
+
     not_allowed = [t for t in refs if t not in perm_map]
     if not_allowed:
         proj_label = project or "this project"
-        msg = ("Access denied\n\n"
-               f"Your current role in '{proj_label}' does not allow: {', '.join(not_allowed)}.\n"
-               "Please contact an administrator.")
+        msg = (
+            "🚫 Access denied\n\n"
+            f"You do not have permission to access the following tables:\n"
+            f"{', '.join(not_allowed)}\n\n"
+            "Please contact your administrator if you need access.")
         return jsonify({"error": msg, "sql": sql}), 403
 
     # 6) Execute

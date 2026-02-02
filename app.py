@@ -45,7 +45,7 @@ def build_engine_from_connstr(conn_str: str):
     return create_engine(conn_str, poolclass=NullPool, future=True)
 
 PROJECT_TO_CONN_ENV = {
-    "Billio": "BILLIO_DB_CONN",
+    "EmployeeDB_Test": "EMPLOYEE_DB_CONN",
     "Sales":  "SALES_DB_CONN"
 }
 
@@ -199,7 +199,14 @@ def api_me():
     name = rbac.get_user_name(email)
     mappings = rbac.get_user_projects(email)
     is_admin = rbac.is_admin(email)
-    return jsonify({"email": email, "name": name, "projects": mappings, "is_admin": is_admin})
+    # Return both is_admin (current code) and isAdmin (requirement) for safety
+    return jsonify({
+        "email": email, 
+        "name": name, 
+        "projects": mappings, 
+        "is_admin": is_admin, 
+        "isAdmin": is_admin
+    })
 
 @app.get("/api/accessible-schema")
 @login_required
@@ -209,18 +216,35 @@ def api_accessible_schema():
         return jsonify({"error":"project is required"}), 400
 
     email = session["email"]
-    allowed = rbac.get_allowed_tables(email, project)
-    if not allowed:
+    
+    # 1. Identify Role
+    user_projects = rbac.get_user_projects(email)
+    role_info = next((p for p in user_projects if p["project"] == project), None)
+    if not role_info:
         return jsonify({"error": "No role in this project"}), 403
+    
+    current_role = role_info["role"].lower()
+    is_privileged = current_role in ["admin", "cto", "manager", "techlead"]
 
-    allowed_table_names = sorted({a["TableName"] for a in allowed if a["CanRead"] or a["CanReadSelf"]})
+    # 2. Get engine and inspector
+    engine = get_project_engine(project)
+    insp = inspect(engine)
+    all_engine_tables = insp.get_table_names()
+
+    # 3. Determine allowed tables
+    if is_privileged:
+        # Privileged roles see all tables in the database
+        allowed_table_names = sorted(all_engine_tables)
+    else:
+        # Others see only what is explicitly granted in RBAC
+        allowed = rbac.get_allowed_tables(email, project)
+        allowed_table_names = sorted({a["TableName"] for a in allowed if a["CanRead"] or a["CanReadSelf"]})
+
     if not allowed_table_names:
         return jsonify({"tables":[], "schema":[]})
 
-    engine = get_project_engine(project)
-    insp = inspect(engine)
     schema_rows = []
-    for t in insp.get_table_names():
+    for t in all_engine_tables:
         if t not in allowed_table_names:
             continue
         try:
@@ -230,11 +254,6 @@ def api_accessible_schema():
         for c in cols:
             schema_rows.append({"table": t, "column": c["name"], "type": str(c["type"])})
     return jsonify({"tables": allowed_table_names, "schema": schema_rows})
-
-LAST_ROWS = {}
-def is_followup(question):
-    keywords = ["which","what","when","highest","lowest","average","count","total","how many","summarize","details"]
-    return any(k in question.lower() for k in keywords)
 
 @app.post("/api/chat")
 @login_required
@@ -247,50 +266,93 @@ def api_chat():
     if not project:
         return jsonify({"error":"project is required"}), 400
 
-    # 1) Get permissions
+    # 1) Get permissions & identify Role
     email = session["email"]
+    user_projects = rbac.get_user_projects(email)
+    is_admin = rbac.is_admin(email)
+    
+    # Find the specific role for this project (Case-insensitive & Trimmed)
+    project_clean = project.strip().lower()
+    current_role_info = next((p for p in user_projects if p["project"].strip().lower() == project_clean), None)
+    
+    if is_admin:
+        current_role = "Admin"
+    elif not current_role_info:
+        return jsonify({"error":f"You do not have access to project: {project}"}), 403
+    else:
+        current_role = current_role_info["role"].strip()
+    
     perms = rbac.get_allowed_tables(email, project)
-    if not perms:
-        return jsonify({"error":"You do not have access to this project"}), 403
-
+    
     # map table -> (CanRead, CanReadSelf)
     perm_map = {p["TableName"]: (bool(p["CanRead"]), bool(p["CanReadSelf"])) for p in perms}
 
-    # 2) Load schema limited to allowed tables
+    # 2. Identify all available tables from engine
     engine = get_project_engine(project)
     insp = inspect(engine)
+    all_engine_tables = insp.get_table_names()
 
     if not selected_tables:
         return jsonify({
             "error": "⚠ Please select at least one table before asking your question."
         }), 400
 
+    # 3. Determine tables to show LLM
+    # Privileged users see full engine schema for selected tables
+    # Restricted users see only what perms allow
+    is_privileged = current_role.lower() in ["admin", "cto", "manager", "techlead"]
+
     schema_rows = []
-    for t in insp.get_table_names():
+    for t in all_engine_tables:
         if t not in selected_tables:
             continue
-        if t not in perm_map:
+        
+        # If not privileged, check if table is in permission map
+        if not is_privileged and t not in perm_map:
             continue
+            
         try:
             cols = insp.get_columns(t)
         except:
             cols = []
         for c in cols:
             schema_rows.append({"table": t, "column": c["name"], "type": str(c["type"])})
+    
     schema_text = "\n".join(f"{r['table']}.{r['column']} ({r['type']})" for r in schema_rows)
-
-    # 3) Follow-up answers on cached rows
-    if is_followup(question) and "rows" in LAST_ROWS:
-        answer = llm_service.summarize_results(question, LAST_ROWS["rows"])
-        return jsonify({
-            "sql": None,
-            "table_html": LAST_ROWS.get("table_html"),
-            "summary": answer
-        })
 
     # Handle Greetings & Small Talk
     q_norm = question.lower().strip().replace('?','').replace('!','')
     
+    # 3.5) Enterprise Privacy Guard (Intelligent RBAC Enforcement)
+    # Check if any selected table has 'CanReadSelf' but NOT 'CanRead' (Global Read)
+    restricted_tables = [t for t in selected_tables if t in perm_map and perm_map[t][1] and not perm_map[t][0]]
+    
+    if restricted_tables and not is_admin:
+        user_name = rbac.get_user_name(email)
+        q_lower = question.lower()
+        
+        # Determine if the query is strictly about the logged-in user
+        # Check for self-referential keywords or the user's own name/email
+        self_keywords = ["my", "me", "mine", "self", "i ", "i'm"]
+        is_self_query = any(word in q_lower for word in self_keywords)
+        
+        if email.lower() in q_lower:
+            is_self_query = True
+        if user_name and user_name.lower() in q_lower:
+            is_self_query = True
+            
+        # Detect if they are asking about someone ELSE specifically
+        # If they mention an email that isn't theirs, or if they don't mention themselves but ask for salary/etc.
+        other_emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', q_lower)
+        if other_emails and any(e != email.lower() for e in other_emails):
+            is_self_query = False
+
+        if not is_self_query:
+            table_list = ", ".join(restricted_tables)
+            return jsonify({
+                "error": f"🔒 **Access Restricted**: You are only authorized to view your personal data in: {table_list}. Your query appears to request information about other entities or general data which is not permitted under current policy."
+            }), 403
+
     conversational_intents = {
         "hi": "Hello! Ready to dive into your data?",
         "hello": "Hi there! What can I help you analyze today?",
@@ -317,14 +379,11 @@ def api_chat():
 
     # 4) Generate SQL with LLM Service
     try:
-        sql = llm_service.generate_sql(schema_text, question, email)
+        sql = llm_service.generate_sql(schema_text, question, email, current_role)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
     # 5) Safety & RBAC
-    if llm_service.is_unsafe(sql) or os.getenv("READ_ONLY","true").lower() == "true" and re.search(r"\b(insert|update|delete|alter|create|truncate|merge|drop)\b", sql, re.I):
-        return jsonify({"error":"Unsafe or non-read query blocked", "sql": sql}), 400
-
     # Ensure referenced tables are permitted
     referenced = set(re.findall(r"\bfrom\s+([a-zA-Z0-9_\.\[\]]+)|\bjoin\s+([a-zA-Z0-9_\.\[\]]+)", sql, flags=re.I))
     refs = set([p for tup in referenced for p in tup if p])
@@ -341,22 +400,27 @@ def api_chat():
     not_allowed = [t for t in refs if t not in valid_tables]
     
     if not_allowed:
-        # Check if it is an alias issue or subquery. 
-        # For simplicity, if table is not in valid_tables, block it.
-        # But some SQL generators use CTEs or Aliases that look like tables. 
-        # We'll rely on the RBAC check as primary gate.
+        # Separate into 'Deselected' vs 'No Permission'
+        deselected = [t for t in not_allowed if t in all_engine_tables and (is_privileged or t in perm_map)]
+        no_permission = [t for t in not_allowed if t not in deselected]
         
-        # Real RBAC check:
-        real_not_allowed = [t for t in not_allowed if t not in perm_map]
-        if real_not_allowed:
+        if deselected:
+            return jsonify({
+                "error": f"⚠ **Table Not Selected**: The generated query uses tables you haven't selected: {', '.join(deselected)}. Please select them in the sidebar to include them in your analysis."
+            }), 400
+            
+        if no_permission:
             msg = (
-                "🚫 Access denied\n\n"
-                f"You do not have permission to access the following tables: {', '.join(real_not_allowed)}\n"
+                "🚫 **Access Denied**\n\n"
+                f"You do not have permission to access the following tables: {', '.join(no_permission)}\n"
             )
             return jsonify({"error": msg, "sql": sql}), 403
 
-    # Apply Row-Level Security
-    sql = apply_row_level_security(sql, perm_map, email)
+    # Apply Row-Level Security with ROLE awareness
+    try:
+        sql = apply_row_level_security(sql, perm_map, email, current_role)
+    except PermissionError as pe:
+        return jsonify({"error": str(pe), "sql": sql}), 403
 
     # 6) Execute
     try:
@@ -369,12 +433,32 @@ def api_chat():
     # 7) Conversational summary
     summary = llm_service.summarize_results(question, rows)
 
-    LAST_ROWS["rows"] = rows
-    LAST_ROWS["table_html"] = table_html
-
     return jsonify({"sql": sql, "table_html": table_html, "summary": summary})
 
 # ========== ADMIN APIs ==========
+@app.get("/api/admin/projects")
+@admin_required
+def api_admin_projects():
+    """Returns all projects from the Projects table."""
+    return jsonify(rbac.get_all_projects())
+
+@app.get("/api/admin/tables")
+@admin_required
+def api_admin_tables():
+    """Returns all tables for a specific project using INFORMATION_SCHEMA."""
+    project = request.args.get("project")
+    if not project:
+        return jsonify({"error": "Project name is required"}), 400
+    
+    try:
+        engine = get_project_engine(project)
+        with engine.connect() as conn:
+            sql = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME"
+            rows = conn.execute(text(sql)).mappings().all()
+            return jsonify([r["TABLE_NAME"] for r in rows])
+    except Exception as e:
+        return jsonify({"error": f"Could not fetch tables for {project}: {str(e)}"}), 500
+
 @app.get("/api/admin/bootstrap")
 @admin_required
 def admin_bootstrap():

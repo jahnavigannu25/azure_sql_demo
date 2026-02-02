@@ -328,10 +328,16 @@ let usedProjects = new Set();
 /* ================= INIT ================= */
 async function init() {
   try {
-    const res = await fetch('/api/admin/bootstrap');
-    meta = await res.json();
+    // 1. Fetch Bootstrap Data (Users, Roles)
+    const bootRes = await fetch('/api/admin/bootstrap');
+    const bootData = await bootRes.json();
+    meta.roles = bootData.roles || [];
     
-    // Populate Role Definitions Selectors
+    // 2. Fetch Projects Dynamically
+    const projRes = await fetch('/api/admin/projects');
+    meta.projects = await projRes.json();
+    
+    // Populate UI Selectors
     populateSelect('permProject', meta.projects.map(p => p.ProjectName));
     populateSelect('permRole', meta.roles.map(r => r.RoleName));
 
@@ -339,6 +345,7 @@ async function init() {
     addGrantRow(); 
     updateProjectUI();
   } catch (e) {
+    console.error("Initialization error:", e);
     showToast("Failed to load system data", false);
   }
 }
@@ -479,42 +486,50 @@ async function loadPermissions() {
   const project = document.getElementById('permProject').value;
   const role = document.getElementById('permRole').value;
   const editor = document.getElementById('permEditor');
+  const tbody = document.getElementById('permBody');
   
   if (!project || !role) {
     editor.style.display = 'none';
     return;
   }
   
-  // Filter tables
-  const projectTables = meta.tables.filter(t => t.ProjectName === project).map(t => t.TableName);
-  
-  // Fetch existing
-  const res = await fetch(`/api/admin/role-permissions?project=${encodeURIComponent(project)}&role=${encodeURIComponent(role)}`);
-  const currentPerms = await res.json();
-  const permMap = {};
-  currentPerms.forEach(p => { permMap[p.TableName] = p; });
-  
-  const tbody = document.getElementById('permBody');
-  if (projectTables.length === 0) {
-     tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding:30px; color:var(--text-muted);">No tables found for this project.</td></tr>';
-  } else {
-    tbody.innerHTML = projectTables.map(t => {
-      const p = permMap[t] || { CanRead: false, CanReadSelf: false };
-      return `
-        <tr>
-          <td><span style="font-family:monospace; font-size:14px;">${t}</span></td>
-          <td style="text-align:center;">
-            <input type="checkbox" class="cb-read" data-table="${t}" ${p.CanRead ? 'checked' : ''}>
-          </td>
-          <td style="text-align:center;">
-            <input type="checkbox" class="cb-self" data-table="${t}" ${p.CanReadSelf ? 'checked' : ''}>
-          </td>
-        </tr>
-      `;
-    }).join('');
-  }
-  
+  tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding:30px; color:var(--text-muted);">Syncing schema from project database...</td></tr>';
   editor.style.display = 'block';
+
+  try {
+    // 1. Fetch live tables from project database
+    const tableRes = await fetch(`/api/admin/tables?project=${encodeURIComponent(project)}`);
+    const projectTables = await tableRes.json();
+    
+    if (projectTables.error) throw new Error(projectTables.error);
+
+    // 2. Fetch existing role permissions
+    const res = await fetch(`/api/admin/role-permissions?project=${encodeURIComponent(project)}&role=${encodeURIComponent(role)}`);
+    const currentPerms = await res.json();
+    const permMap = {};
+    currentPerms.forEach(p => { permMap[p.TableName] = p; });
+    
+    if (projectTables.length === 0) {
+       tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding:30px; color:var(--text-muted);">No tables found for this project.</td></tr>';
+    } else {
+      tbody.innerHTML = projectTables.map(t => {
+        const p = permMap[t] || { CanRead: false, CanReadSelf: false };
+        return `
+          <tr>
+            <td><span style="font-family:monospace; font-size:14px;">${t}</span></td>
+            <td style="text-align:center;">
+              <input type="checkbox" class="cb-read" data-table="${t}" ${p.CanRead ? 'checked' : ''}>
+            </td>
+            <td style="text-align:center;">
+              <input type="checkbox" class="cb-self" data-table="${t}" ${p.CanReadSelf ? 'checked' : ''}>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:30px; color:var(--danger);">Error: ${err.message}</td></tr>`;
+  }
 }
 
 function permBulk(checked, isSelf) {

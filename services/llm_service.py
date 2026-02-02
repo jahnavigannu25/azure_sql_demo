@@ -31,23 +31,25 @@ class LLMService:
         """Check for dangerous keywords."""
         return bool(self.DANGEROUS_PATTERN.search(sql))
 
-    def generate_sql(self, schema_text: str, question: str, email: str) -> str:
+    def generate_sql(self, schema_text: str, question: str, email: str, role: str) -> str:
         """
         Generate T-SQL query based on schema and question.
-        Enforces strict project isolation.
+        Trusts the downstream RLS layer for row-level security.
         """
         prompt = f"""
-You are a highly restricted T-SQL Query Generator for an Azure SQL Database.
-You are interacting with the database for a specific project. 
+You are an Expert T-SQL Data Analyst. Your goal is to provide precise, accurate, and high-performance T-SQL queries.
 
-CRITICAL SECURITY & LOGIC RULES:
-1. **Scope Isolation**: You MUST ONLY use tables and columns explicitly defined in the SCHEMA below. Do not assume the existence of any other tables. If the information cannot be found in the provided schema, reply with "I cannot answer this from the selected tables."
-2. **Read-Only**: Generate ONLY `SELECT` queries. No INSERT, UPDATE, DELETE, DROP, etc.
-3. **Data Security**: 
-   - If a table contains columns like `Email`, `UserEmail`, or `Username`, you MUST filter the query to only show data for `{email}` (e.g., `WHERE Email = '{email}'`).
-   - If no user-specific column exists, ensure the query is an aggregation (COUNT, SUM, AVG) or generic list that doesn't leak sensitive personal row data unless explicitly appropriate.
-4. **Syntax**: Use T-SQL (Microsoft SQL Server) syntax.
-5. **Output**: Return ONLY the raw SQL query inside triple backticks (```sql ... ```). No explanation, no conversational text.
+ANALYTICAL GUIDELINES:
+1. **Full Access**: Use ANY column defined in the SCHEMA to answer the question. Do NOT omit sensitive columns like Salary, Budget, or Roles; assume the user has clearance.
+2. **Advanced SQL**: Prefer JOINS, aggregations (SUM, AVG, COUNT), and window functions if they provide a better answer. 
+3. **Names & Searching**: For any name-based filters (e.g. searching for an employee), ALWAYS use the `LIKE` operator with wildcards (e.g., `WHERE Name LIKE '%Manish%'`) to handle variations in naming.
+4. **Joins**: If the user asks for related data (e.g. Employee and their Attendance), perform an INNER or LEFT JOIN using the appropriate keys.
+5. **No Hallucinations**: Only use the tables and columns explicitly listed in the SCHEMA.
+6. **Read-Only**: Generate ONLY `SELECT` statements.
+
+USER CONTEXT:
+User Role: {role}
+User Email: {email}
 
 SCHEMA:
 {schema_text}
@@ -59,10 +61,10 @@ USER QUESTION:
             response = self.client.chat.completions.create(
                 model=self.deployment,
                 messages=[
-                    {"role": "system", "content": "You are a strict T-SQL generator. You never output anything other than valid SQL code inside code blocks."},
+                    {"role": "system", "content": "You are a specialized T-SQL architect. You only return valid T-SQL code inside code blocks. You do not explain the code."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.0  # Zero temperature for maximum determinism
+                temperature=0.0
             )
             raw_content = response.choices[0].message.content
             return self.extract_sql(raw_content)

@@ -10,23 +10,15 @@ from sqlalchemy.exc import IntegrityError
 from dotenv import load_dotenv
 import msal
 
+from services.rbac_service import rbac
+from services.row_security import apply_row_level_security
+from services.llm_service import llm_service
+
 # ------------ Load .env ------------
 load_dotenv()
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = os.getenv("FLASK_SECRET", "super_secret_for_sessions")
-
-# ------------ Azure OpenAI ------------
-from openai import AzureOpenAI
-
-def get_llm():
-    return AzureOpenAI(
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-    )
-
-DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")
 
 # ------------ MSAL (Entra) ------------
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -52,9 +44,6 @@ def build_engine_from_connstr(conn_str: str):
         )
     return create_engine(conn_str, poolclass=NullPool, future=True)
 
-def get_admin_engine():
-    return build_engine_from_connstr(os.getenv("ADMIN_DB_CONN"))
-
 PROJECT_TO_CONN_ENV = {
     "Billio": "BILLIO_DB_CONN",
     "Sales":  "SALES_DB_CONN"
@@ -75,60 +64,6 @@ def convert_values(obj):
         return float(obj)
     return obj
 
-# ------------ LLM helpers ------------
-def extract_sql(text_in):
-    """Pull a single runnable SELECT from LLM output inside triple backticks."""
-    if "```" in text_in:
-        parts = text_in.split("```")
-        for p in parts:
-            if re.search(r"\bselect\b|\bwith\b", p, flags=re.I):
-                cleaned = "\n".join(
-                    ln for ln in p.splitlines()
-                    if not ln.strip().lower().startswith("sql")
-                )
-                return cleaned.strip()
-    return text_in.strip()
-
-DANGEROUS = re.compile(r"\b(insert|update|delete|truncate|drop|alter|create|replace|merge)\b", re.I)
-def is_unsafe(sql):
-    return bool(DANGEROUS.search(sql))
-
-def conversational_summary_from_rows(question, rows):
-    """
-    Balanced conversational + professional summary (2–6 sentences).
-    No SQL, no code. Human-readable.
-    """
-    client = get_llm()
-    prompt = f"""
-You are a senior data analyst. Write a concise, professional, conversational answer for a business user.
-
-Guidelines:
-- 2–6 short sentences, natural tone (balanced: not too casual, not too formal).
-- Explain the key figures and context clearly.
-- If dates or ranges are evident, mention them simply.
-- If the data is empty, say so politely and suggest a likely reason.
-- Do NOT include SQL or code.
-
-User question:
-{question}
-
-Rows (JSON sample):
-{json.dumps(rows, default=str)[:12000]}
-"""
-    try:
-        resp = client.chat.completions.create(
-            model=DEPLOYMENT,
-            messages=[{"role":"user","content":prompt}],
-            temperature=0.2
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception:
-        if not rows:
-            return ("I couldn’t find any records for that request. "
-                    "We can try a different time range or filter.")
-        return ("Here’s a brief summary of the result above. "
-                "Tell me if you want this broken down by time, product, or region.")
-
 # ------------ SQL execution + table render ------------
 def run_sql(engine, sql, limit=500):
     rows = []
@@ -146,14 +81,13 @@ def run_sql(engine, sql, limit=500):
 
 def format_table(rows):
     if not rows:
-        return "<div class='no-results'>No data found.</div>"
+        return ""
 
     headers = rows[0].keys()
     html = """
-    <div class='result-table-wrap'>
-        <table class='result-table'>
-            <thead>
-                <tr>
+    <table class="premium-data-table">
+        <thead>
+            <tr>
     """
     for h in headers:
         html += f"<th>{h}</th>"
@@ -164,18 +98,18 @@ def format_table(rows):
         for h in headers:
             val = r[h]
             # Format long strings
-            if isinstance(val, str) and len(val) > 28:
-                val = val[:14] + "…" + val[-10:]
+            if isinstance(val, str) and len(val) > 50:
+                val = val[:47] + "..."
             # Format ISO dates
             try:
                 if isinstance(val, str) and "T" in val:
                     dt = datetime.fromisoformat(val.replace("Z", ""))
-                    val = dt.strftime("%d-%b-%Y")
+                    val = dt.strftime("%d %b, %Y")
             except:
                 pass
             html += f"<td>{val}</td>"
         html += "</tr>"
-    html += "</tbody></table></div>"
+    html += "</tbody></table>"
     return html
 
 # ========== SESSION / AUTH GUARDS ==========
@@ -193,17 +127,8 @@ def admin_required(f):
         if "email" not in session:
             return redirect(url_for("login"))
         email = session["email"]
-        with get_admin_engine().connect() as conn:
-            q = """
-            SELECT 1
-            FROM Users u
-            JOIN UserProjectRoles upr ON upr.UserID = u.UserID
-            JOIN Roles r ON r.RoleID = upr.RoleID
-            WHERE u.Email = :email AND r.RoleName = 'Admin'
-            """
-            row = conn.execute(text(q), {"email": email}).first()
-            if not row:
-                return "Access denied (Admin only)", 403
+        if not rbac.is_admin(email):
+             return "Access denied (Admin only)", 403
         return f(*args, **kwargs)
     return inner
 
@@ -222,8 +147,13 @@ def getAToken():
     )
     if "access_token" in result:
         email = result["id_token_claims"].get("preferred_username") or result["id_token_claims"].get("upn")
+        
+        # Domain Restriction
+        if not email or not email.lower().endswith("@ariqt.com"):
+            return "Access denied. Only @ariqt.com accounts are allowed.", 403
+            
         session["email"] = email
-        return redirect(url_for("home"))
+        return redirect(url_for("chatui")) # Direct to chat
     return f"Auth error: {result.get('error_description')}"
 
 @app.get("/logout")
@@ -234,16 +164,21 @@ def logout():
     aad_logout = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/logout?post_logout_redirect_uri={post_logout}"
     return redirect(aad_logout)
 
+@app.get("/logo.svg")
+def serve_logo():
+    return send_from_directory("static", "logo.svg")
+
 # ========== BASIC PAGES ==========
 @app.get("/")
 def root():
     if "email" in session:
-        return redirect(url_for("home"))
+        return redirect(url_for("chatui"))
     return render_template("login.html")
 
 @app.get("/home")
 @login_required
 def home():
+    # Deprecated dashboard, strictly for legacy if needed, but we prefer chatui
     return render_template("home.html", email=session["email"])
 
 @app.get("/chatui")
@@ -256,51 +191,15 @@ def chatui():
 def admin_page():
     return send_from_directory("static", "admin.html")
 
-# ========== ADMIN DB QUERIES ==========
-def get_user_projects_and_roles(email:str):
-    sql = """
-    SELECT p.ProjectName, r.RoleName
-    FROM Users u
-    JOIN UserProjectRoles upr ON upr.UserID = u.UserID
-    JOIN Projects p ON p.ProjectID = upr.ProjectID
-    JOIN Roles r ON r.RoleID = upr.RoleID
-    WHERE u.Email = :email
-    """
-    with get_admin_engine().connect() as conn:
-        rows = conn.execute(text(sql), {"email": email}).mappings().all()
-        return [{"project": r["ProjectName"], "role": r["RoleName"]} for r in rows]
-
-def get_allowed_tables(email:str, project:str):
-    sql = """
-    SELECT perm.TableName, perm.CanRead, perm.CanReadSelf, r.RoleName
-    FROM Users u
-    JOIN UserProjectRoles upr ON upr.UserID = u.UserID
-    JOIN Projects p ON p.ProjectID = upr.ProjectID
-    JOIN Roles r ON r.RoleID = upr.RoleID
-    JOIN Permissions perm ON perm.ProjectID = p.ProjectID AND perm.RoleID = r.RoleID
-    WHERE u.Email = :email AND p.ProjectName = :project
-    """
-    with get_admin_engine().connect() as conn:
-        return [dict(x) for x in conn.execute(text(sql), {"email": email, "project": project}).mappings().all()]
-
-def list_project_tables_from_admin(project:str):
-    sql = """
-    SELECT td.TableName
-    FROM TableDirectory td
-    JOIN Projects p ON p.ProjectID = td.ProjectID
-    WHERE p.ProjectName = :project
-    ORDER BY td.TableName
-    """
-    with get_admin_engine().connect() as conn:
-        return [r[0] for r in conn.execute(text(sql), {"project": project}).all()]
-
 # ========== APIs ==========
 @app.get("/api/me")
 @login_required
 def api_me():
     email = session["email"]
-    mappings = get_user_projects_and_roles(email)
-    return jsonify({"email": email, "projects": mappings})
+    name = rbac.get_user_name(email)
+    mappings = rbac.get_user_projects(email)
+    is_admin = rbac.is_admin(email)
+    return jsonify({"email": email, "name": name, "projects": mappings, "is_admin": is_admin})
 
 @app.get("/api/accessible-schema")
 @login_required
@@ -310,7 +209,7 @@ def api_accessible_schema():
         return jsonify({"error":"project is required"}), 400
 
     email = session["email"]
-    allowed = get_allowed_tables(email, project)
+    allowed = rbac.get_allowed_tables(email, project)
     if not allowed:
         return jsonify({"error": "No role in this project"}), 403
 
@@ -350,7 +249,7 @@ def api_chat():
 
     # 1) Get permissions
     email = session["email"]
-    perms = get_allowed_tables(email, project)
+    perms = rbac.get_allowed_tables(email, project)
     if not perms:
         return jsonify({"error":"You do not have access to this project"}), 403
 
@@ -382,45 +281,48 @@ def api_chat():
 
     # 3) Follow-up answers on cached rows
     if is_followup(question) and "rows" in LAST_ROWS:
-        answer = conversational_summary_from_rows(question, LAST_ROWS["rows"])
+        answer = llm_service.summarize_results(question, LAST_ROWS["rows"])
         return jsonify({
             "sql": None,
             "table_html": LAST_ROWS.get("table_html"),
             "summary": answer
         })
 
-    # 4) Generate SQL with LLM
-    client = get_llm()
-    prompt = f"""
-You are an expert SQL generator.
+    # Handle Greetings & Small Talk
+    q_norm = question.lower().strip().replace('?','').replace('!','')
+    
+    conversational_intents = {
+        "hi": "Hello! Ready to dive into your data?",
+        "hello": "Hi there! What can I help you analyze today?",
+        "hey": "Hey! I'm listening.",
+        "good morning": "Good morning! Let's get to work.",
+        "how are you": "I'm functioning perfectly and ready to run some queries for you! How can I help?",
+        "who are you": "I am your AI Data Assistant, designed to help you query and understand your Azure SQL data securely.",
+        "what can you do": "I can query your database, summarize results, and help you find insights in tables like " + (", ".join(selected_tables[:3]) if selected_tables else "your project tables") + ".",
+        "thanks": "You're welcome! Let me know if you need anything else.",
+        "thank you": "You're welcome! Happy to help."
+    }
 
-Rules:
-1) Use ONLY these tables/columns:
-{schema_text}
+    if q_norm in conversational_intents:
+        name = rbac.get_user_name(email) or ""
+        msg = conversational_intents[q_norm]
+        if name and "Hello" in msg:
+            msg = msg.replace("Hello!", f"Hello {name}!")
+        
+        return jsonify({
+            "sql": None, 
+            "table_html": "",
+            "summary": msg
+        })
 
-2) Generate ONE runnable SELECT (no DML/DDL).
-3) Always include table aliases if joining.
-4) NEVER use tables not listed.
-5) Return the SQL inside triple backticks ONLY.
-6) If you need user-specific info (like "my salary"), constrain by user identity column if present:
-   - If a table has an Email/UserEmail/Username column, filter by Email = '{email}'.
-   - If no such column exists, avoid leaking other people's data.
-
-USER QUESTION:
-{question}
-"""
+    # 4) Generate SQL with LLM Service
     try:
-        raw = client.chat.completions.create(
-            model=DEPLOYMENT,
-            messages=[{"role":"user","content":prompt}],
-            temperature=0.1
-        ).choices[0].message.content
-        sql = extract_sql(raw)
+        sql = llm_service.generate_sql(schema_text, question, email)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
     # 5) Safety & RBAC
-    if is_unsafe(sql) or os.getenv("READ_ONLY","true").lower() == "true" and re.search(r"\b(insert|update|delete|alter|create|truncate|merge|drop)\b", sql, re.I):
+    if llm_service.is_unsafe(sql) or os.getenv("READ_ONLY","true").lower() == "true" and re.search(r"\b(insert|update|delete|alter|create|truncate|merge|drop)\b", sql, re.I):
         return jsonify({"error":"Unsafe or non-read query blocked", "sql": sql}), 400
 
     # Ensure referenced tables are permitted
@@ -433,20 +335,28 @@ USER QUESTION:
             n = n.split(".")[-1]
         return n
     refs = {clean_name(x) for x in refs}
-    if not refs and selected_tables:
-        return jsonify({
-            "error": "Your question does not match any of the selected tables. Please rephrase or select the correct tables."
-        }), 400
-
-    not_allowed = [t for t in refs if t not in perm_map]
+    
+    # Strictly validate against schema_rows logic (selected + permitted)
+    valid_tables = {r['table'] for r in schema_rows}
+    not_allowed = [t for t in refs if t not in valid_tables]
+    
     if not_allowed:
-        proj_label = project or "this project"
-        msg = (
-            "🚫 Access denied\n\n"
-            f"You do not have permission to access the following tables:\n"
-            f"{', '.join(not_allowed)}\n\n"
-            "Please contact your administrator if you need access.")
-        return jsonify({"error": msg, "sql": sql}), 403
+        # Check if it is an alias issue or subquery. 
+        # For simplicity, if table is not in valid_tables, block it.
+        # But some SQL generators use CTEs or Aliases that look like tables. 
+        # We'll rely on the RBAC check as primary gate.
+        
+        # Real RBAC check:
+        real_not_allowed = [t for t in not_allowed if t not in perm_map]
+        if real_not_allowed:
+            msg = (
+                "🚫 Access denied\n\n"
+                f"You do not have permission to access the following tables: {', '.join(real_not_allowed)}\n"
+            )
+            return jsonify({"error": msg, "sql": sql}), 403
+
+    # Apply Row-Level Security
+    sql = apply_row_level_security(sql, perm_map, email)
 
     # 6) Execute
     try:
@@ -457,7 +367,7 @@ USER QUESTION:
     table_html = format_table(rows)
 
     # 7) Conversational summary
-    summary = conversational_summary_from_rows(question, rows)
+    summary = llm_service.summarize_results(question, rows)
 
     LAST_ROWS["rows"] = rows
     LAST_ROWS["table_html"] = table_html
@@ -468,143 +378,60 @@ USER QUESTION:
 @app.get("/api/admin/bootstrap")
 @admin_required
 def admin_bootstrap():
-    with get_admin_engine().connect() as conn:
-        users = [dict(x) for x in conn.execute(text("SELECT UserID,Email,Name FROM Users ORDER BY Email")).mappings().all()]
-        projects = [dict(x) for x in conn.execute(text("SELECT ProjectID,ProjectName FROM Projects ORDER BY ProjectName")).mappings().all()]
-        roles = [dict(x) for x in conn.execute(text("SELECT RoleID,RoleName FROM Roles ORDER BY RoleName")).mappings().all()]
-        td = [dict(x) for x in conn.execute(text("""
-            SELECT td.ID, p.ProjectName, td.TableName
-            FROM TableDirectory td JOIN Projects p ON p.ProjectID = td.ProjectID
-            ORDER BY p.ProjectName, td.TableName
-        """)).mappings().all()]
-    return jsonify({"users": users, "projects": projects, "roles": roles, "tables": td})
+    return jsonify(rbac.get_bootstrap_data())
 
-# ---- Disable old write endpoints in True Save All mode ----
-@app.post("/api/admin/add-user")
+@app.get("/api/admin/role-permissions")
 @admin_required
-def admin_add_user_disabled():
-    return jsonify({"error": "This action is disabled in True Save All mode. Use /api/admin/save-all"}), 409
+def admin_role_permissions():
+    project = request.args.get("project")
+    role = request.args.get("role")
+    if not project or not role:
+        return jsonify({"error": "Missing project or role"}), 400
+    perms = rbac.get_project_role_permissions(project, role)
+    return jsonify(perms)
 
-@app.post("/api/admin/grant-role")
+@app.post("/api/admin/assign-user")
 @admin_required
-def admin_grant_role_disabled():
-    return jsonify({"error": "This action is disabled in True Save All mode. Use /api/admin/save-all"}), 409
-
-@app.post("/api/admin/set-permissions-bulk")
-@admin_required
-def admin_set_permissions_bulk_disabled():
-    return jsonify({"error": "This action is disabled in True Save All mode. Use /api/admin/save-all"}), 409
-
-# ---- New atomic Save All ----
-@app.post("/api/admin/save-all")
-@admin_required
-def save_all():
+def api_admin_assign_user():
     """
-    Payload:
-    {
-      "user": {"email":"...", "name":"..."},
-      "grants": [ {"project":"...", "role":"..."} ],
-      "permissions": [
-        {"role":"...","project":"...","table":"...","canRead":true,"canReadSelf":false}
-      ]
-    }
+    Assign a user to one or more projects with specific roles.
+    Payload: { "email": "...", "name": "...", "grants": [ {"project": "...", "role": "..."} ] }
     """
     try:
-        data = request.get_json(force=True) or {}
-        user = data.get("user")
-        grants = data.get("grants", [])
-        perms  = data.get("permissions", [])
+        data = request.json
+        rbac.assign_user_role(data.get("email"), data.get("name"), data.get("grants", []))
+        return jsonify({"status": "ok", "message": "User assigned successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-        # ---- Validation: required fields ----
-        if not user or not user.get("email") or not user.get("name"):
-            return jsonify({"error": "Please fill the required fields."}), 400
+@app.post("/api/admin/update-permissions")
+@admin_required
+def api_admin_update_permissions():
+    """
+    Update permissions for a specific Role in a specific Project.
+    Payload: { "role": "...", "project": "...", "permissions": [ {"table": "...", "canRead": true, ...} ] }
+    """
+    try:
+        data = request.json
+        rbac.update_role_permissions(data.get("role"), data.get("project"), data.get("permissions", []))
+        return jsonify({"status": "ok", "message": "Permissions updated successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-        email = (user["email"] or "").strip().lower()
-        name  = (user["name"] or "").strip()
-        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-            return jsonify({"error": "Please fill the required fields."}), 400
-
-        for g in grants:
-            if not g.get("project") or not g.get("role"):
-                return jsonify({"error": "Please fill the required fields."}), 400
-
-        for p in perms:
-            if not p.get("role") or not p.get("project") or not p.get("table"):
-                return jsonify({"error": "Please fill the required fields."}), 400
-
-        # ---- Transactional Save (atomic) ----
-        with get_admin_engine().begin() as conn:
-            # 1) Upsert user (UserID is IDENTITY)
-            upsert_user_sql = text("""
-                IF NOT EXISTS (SELECT 1 FROM Users WHERE Email = :e)
-                    INSERT INTO Users(Email, Name) VALUES(:e, :n);
-            """)
-            conn.execute(upsert_user_sql, {"e": email, "n": name})
-
-            # Update name if already exists (optional, keeps admin edits in sync)
-            conn.execute(text("UPDATE Users SET Name=:n WHERE Email=:e"), {"n": name, "e": email})
-
-            # Fetch UserID
-            user_id = conn.execute(text("SELECT UserID FROM Users WHERE Email=:e"), {"e": email}).scalar()
-            if not user_id:
-                raise RuntimeError("Failed to resolve UserID after insert")
-
-            # Utility to map names to IDs
-            def get_project_id(project_name: str):
-                return conn.execute(text("SELECT ProjectID FROM Projects WHERE ProjectName=:p"),
-                                    {"p": project_name}).scalar()
-
-            def get_role_id(role_name: str):
-                return conn.execute(text("SELECT RoleID FROM Roles WHERE RoleName=:r"),
-                                    {"r": role_name}).scalar()
-
-            # 2) Upsert user grants
-            for g in grants:
-                pid = get_project_id(g["project"])
-                rid = get_role_id(g["role"])
-                if not pid or not rid:
-                    raise RuntimeError(f"Unknown project/role: {g['project']} / {g['role']}")
-
-                conn.execute(text("""
-                    IF NOT EXISTS (
-                        SELECT 1 FROM UserProjectRoles WHERE UserID=:uid AND ProjectID=:pid
-                    )
-                        INSERT INTO UserProjectRoles(UserID, ProjectID, RoleID)
-                        VALUES(:uid, :pid, :rid)
-                    ELSE
-                        UPDATE UserProjectRoles SET RoleID=:rid
-                        WHERE UserID=:uid AND ProjectID=:pid
-                """), {"uid": user_id, "pid": pid, "rid": rid})
-
-            # 3) Upsert role-based permissions
-            for p in perms:
-                pid = get_project_id(p["project"])
-                rid = get_role_id(p["role"])
-                if not pid or not rid:
-                    raise RuntimeError(f"Unknown project/role in permissions: {p['project']} / {p['role']}")
-
-                can_read = 1 if p.get("canRead") else 0
-                can_self = 1 if p.get("canReadSelf") else 0
-
-                conn.execute(text("""
-                    IF NOT EXISTS (
-                        SELECT 1 FROM Permissions
-                        WHERE ProjectID=:pid AND RoleID=:rid AND TableName=:tbl
-                    )
-                        INSERT INTO Permissions(ProjectID, RoleID, TableName, CanRead, CanReadSelf)
-                        VALUES(:pid, :rid, :tbl, :cr, :cs)
-                    ELSE
-                        UPDATE Permissions
-                        SET CanRead=:cr, CanReadSelf=:cs
-                        WHERE ProjectID=:pid AND RoleID=:rid AND TableName=:tbl
-                """), {"pid": pid, "rid": rid, "tbl": p["table"], "cr": can_read, "cs": can_self})
-
-        return jsonify({"status": "ok", "message": "All changes saved atomically"})
-
+@app.post("/api/admin/delete-user")
+@admin_required
+def api_admin_delete_user():
+    """
+    Delete a user.
+    Payload: { "email": "..." }
+    """
+    try:
+        data = request.json
+        rbac.delete_user(data.get("email"))
+        return jsonify({"status": "ok", "message": "User deleted successfully"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # --------- (Optional) run local ----------
 if __name__ == "__main__":
-    # POST_LOGOUT_REDIRECT_URI can be set; defaults to /login
     app.run(debug=True, port=5000)

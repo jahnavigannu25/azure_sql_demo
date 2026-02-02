@@ -2,598 +2,570 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>RBAC Admin Panel</title>
+<title>Lumina Admin Console</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-
+<link rel="icon" type="image/svg+xml" href="/logo.svg" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-
 /* =============================== */
-/*          GLOBAL STYLE           */
+/*     Lumina Premium Theme        */
 /* =============================== */
 
-:root{
-  --bg:#0e1013;
-  --card:#15181f;
-  --border:#22252f;
-  --text:#e6edf3;
-  --sub:#9aa1ab;
-  --accent:#10a37f;
-  --accent-dark:#0c8c6d;
-  --hover:#1c2028;
-  --danger:#e25555;
+:root {
+  --bg-page: #030712;
+  --bg-card: #0F1116;
+  --bg-input: #1A1D24;
+  --border: #2A2E37;
+  
+  --text-main: #F3F4F6;
+  --text-muted: #9CA3AF;
+  
+  --primary: #06B6D4;
+  --primary-hover: #0891B2;
+  
+  --danger: #EF4444;
+  --success: #10B981;
 }
 
-*{
-  margin:0;
-  padding:0;
-  box-sizing:border-box;
-  font-family:Inter,system-ui,sans-serif;
+* { margin:0; padding:0; box-sizing:border-box; font-family:'Inter', sans-serif; }
+
+body {
+  background: var(--bg-page);
+  color: var(--text-main);
+  padding-bottom: 60px;
+  min-height: 100vh;
+  background-image: 
+      radial-gradient(circle at 10% 20%, rgba(6, 182, 212, 0.08), transparent 30%), 
+      radial-gradient(circle at 90% 80%, rgba(59, 130, 246, 0.08), transparent 30%);
+  background-attachment: fixed;
 }
 
-body{
-  background:var(--bg);
-  color:var(--text);
-  padding-bottom:50px;
+/* NAVBAR */
+.navbar {
+  background: rgba(15, 17, 22, 0.8);
+  backdrop-filter: blur(12px);
+  height: 80px;
+  padding: 0 40px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky; top: 0; z-index: 50;
+}
+.brand { 
+  display:flex; align-items:center; gap:16px; 
+}
+.brand-logo { width: 32px; height: 32px; }
+.brand-name { 
+  font-size: 20px; font-weight: 700; color: #fff; letter-spacing: -0.5px;
+}
+.brand-badge {
+  background: rgba(6, 182, 212, 0.1); color: var(--primary);
+  font-size: 10px; font-weight: 700; padding: 4px 8px; border-radius: 6px;
+  text-transform: uppercase; letter-spacing: 1px; border: 1px solid rgba(6, 182, 212, 0.2);
 }
 
-.navbar{
-  background:#12151a;
-  padding:16px 24px;
-  display:flex;
-  align-items:center;
-  border-bottom:1px solid var(--border);
-  position:sticky;
-  top:0;
-  z-index:20;
+.nav-back { 
+  color: var(--text-muted); 
+  text-decoration: none; 
+  font-size: 13px; 
+  font-weight: 600; 
+  padding: 10px 18px;
+  border-radius: 10px;
+  transition: all 0.2s; 
+  border: 1px solid transparent;
 }
-.brand{
-  font-size:20px;
-  font-weight:700;
+.nav-back:hover { color: #fff; background: rgba(255,255,255,0.05); border-color: var(--border); }
+
+/* CONTAINER */
+.container { max-width: 1100px; margin: 40px auto; padding: 0 24px; }
+
+/* TABS */
+.tabs { display: flex; gap: 6px; margin-bottom: 30px; background: var(--bg-card); padding: 6px; border-radius: 12px; border: 1px solid var(--border); display: inline-flex; }
+.tab-btn {
+  background: none;
+  border: none;
+  padding: 10px 24px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s;
 }
-.nav-user{
-  margin-left:auto;
-  color:var(--sub);
+.tab-btn:hover { color: var(--text-main); }
+.tab-btn.active { background: var(--bg-input); color: #fff; shadow: 0 2px 4px rgba(0,0,0,0.2); }
+.tab-btn.active::after { display: none; } 
+
+.tab-content { display: none; animation: fadeIn 0.4s ease; }
+.tab-content.active { display: block; }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* CARDS */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 40px;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3);
+}
+.card-header { margin-bottom: 32px; border-bottom: 1px solid var(--border); padding-bottom: 20px; }
+.card h2 { font-size: 24px; font-weight: 700; margin-bottom: 8px; color: #fff; letter-spacing: -0.5px; }
+.card p { color: var(--text-muted); font-size: 14px; line-height: 1.6; }
+
+/* FORMS */
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-bottom: 32px; }
+.form-field label { display: block; font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.form-field input, .form-field select {
+  width: 100%; 
+  background: var(--bg-input); 
+  border: 1px solid var(--border);
+  color: #fff; 
+  padding: 14px; 
+  border-radius: 12px; 
+  font-size: 14px;
+  transition: all 0.2s;
+  outline: none;
+}
+.form-field input:focus, .form-field select:focus { 
+  border-color: var(--primary); 
+  box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2); 
 }
 
-.container{
-  max-width:1050px;
-  margin:32px auto;
-  padding:0 16px;
+/* ASSIGNMENT ROWS */
+.grant-row {
+  display: flex; gap: 20px; align-items: flex-end; 
+  background: #15181E;
+  padding: 20px; border-radius: 14px; margin-bottom: 16px; 
+  border: 1px solid var(--border);
+  animation: slideIn 0.3s ease-out;
 }
+@keyframes slideIn { from { opacity:0; transform: translateX(-10px); } to { opacity:1; transform: translateX(0); } }
 
-.card{
-  background:var(--card);
-  border:1px solid var(--border);
-  border-radius:14px;
-  padding:24px;
-  margin-bottom:28px;
+.btn-remove {
+  background: rgba(239, 68, 68, 0.1); 
+  color: var(--danger); 
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  width: 48px; height: 48px; 
+  border-radius: 12px; cursor: pointer; 
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  font-size: 18px;
 }
+.btn-remove:hover { background: var(--danger); color: white; }
 
-.card-title{
-  font-size:20px;
-  font-weight:700;
-  margin-bottom:6px;
+/* BUTTONS */
+.btn {
+  padding: 14px 28px; border-radius: 12px; font-weight: 600; font-size: 14px; 
+  cursor: pointer; border: none; transition: 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
 }
-.card-sub{
-  color:var(--sub);
-  font-size:14px;
-  margin-bottom:20px;
-}
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.section{
-  margin-bottom:32px;
+.btn-primary { 
+  background: linear-gradient(135deg, #06B6D4 0%, #3B82F6 100%); 
+  color: white; 
+  box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3); 
 }
-.section-title{
-  font-size:16px;
-  margin-bottom:10px;
-  font-weight:600;
-}
-.section-sub{
-  font-size:13px;
-  color:var(--sub);
-  margin-bottom:14px;
-}
+.btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(6, 182, 212, 0.4); }
 
-.form-row{
-  display:flex;
-  gap:20px;
-  flex-wrap:wrap;
-}
+.btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-main); }
+.btn-secondary:hover:not(:disabled) { background: var(--bg-input); border-color: var(--text-muted); color: #fff; }
 
-.form-field{
-  flex:1;
-  min-width:260px;
+/* PERMISSION TABLE */
+.perm-table-wrap { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--bg-input); }
+.perm-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.perm-table th {
+  background: #15181E; text-align: left; color: var(--text-muted); 
+  padding: 16px 24px; border-bottom: 1px solid var(--border); font-weight: 600; 
+  text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px;
 }
+.perm-table td { padding: 16px 24px; border-bottom: 1px solid var(--border); color: var(--text-main); }
+.perm-table tr:last-child td { border-bottom: none; }
+.perm-table tr:hover td { background: rgba(255,255,255,0.03); }
 
-label{
-  font-size:13px;
-  color:var(--sub);
-  margin-bottom:6px;
-  display:block;
-}
-label span{
-  color:var(--danger);
-}
-
-input, select{
-  width:100%;
-  padding:10px 12px;
-  background:#0f1117;
-  color:var(--text);
-  border:1px solid var(--border);
-  border-radius:10px;
-  outline:none;
-  font-size:14px;
-}
-input:focus, select:focus{
-  border-color:var(--accent);
-}
-
-hr{
-  border:none;
-  border-top:1px solid var(--border);
-  margin:24px 0;
-}
-
-/* PROJECT CHECKBOXES */
-.project-checkbox-list{
-  display:flex;
-  flex-wrap:wrap;
-  gap:10px;
-}
-.project-checkbox{
-  padding:10px 14px;
-  background:#1a1d24;
-  border:1px solid var(--border);
-  border-radius:10px;
-  cursor:pointer;
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-.project-checkbox input{
-  width:auto;
-}
-
-/* PERMISSIONS */
-.perm-section{
-  margin-bottom:22px;
-  background:#1a1d24;
-  padding:16px;
-  border-radius:12px;
-  border:1px solid var(--border);
-}
-.perm-title{
-  font-size:15px;
-  font-weight:600;
-  margin-bottom:10px;
-}
-.perm-table{
-  width:100%;
-  border-collapse:collapse;
-}
-.perm-table th{
-  text-align:left;
-  padding:8px;
-  color:var(--sub);
-  border-bottom:1px solid var(--border);
-}
-.perm-table td{
-  padding:8px;
-  border-bottom:1px solid var(--border);
-}
-
-/* PERMISSION BUTTONS */
-.perm-actions{
-  display:flex;
-  gap:10px;
-  margin-bottom:12px;
-}
-
-.perm-btn{
-  padding:6px 12px;
-  background:#1f242c;
-  border:1px solid var(--border);
-  color:var(--text);
-  border-radius:8px;
-  cursor:pointer;
-  font-size:13px;
-}
-.perm-btn:hover{
-  background:#232833;
-}
-
-.perm-btn.danger{
-  background:#2a1616;
-  border-color:#522;
-  color:#ffdddd;
-}
-.perm-btn.danger:hover{
-  background:#3c1d1d;
-}
-
-/* SAVE BUTTON */
-.primary-btn{
-  padding:12px 26px;
-  background:var(--accent);
-  border:none;
-  color:white;
-  font-size:15px;
-  font-weight:700;
-  border-radius:10px;
-  cursor:pointer;
-}
-.primary-btn:hover{
-  background:var(--accent-dark);
-}
-
-/* SNAPSHOT */
-.stats-table{
-  width:100%;
-  border-collapse:collapse;
-  margin-top:10px;
-}
-.stats-table th{
-  background:#1d2129;
-  padding:10px;
-  text-align:left;
-  border-bottom:1px solid var(--border);
-}
-.stats-table td{
-  padding:10px;
-  border-bottom:1px solid var(--border);
+/* CHECKBOXES */
+input[type="checkbox"] {
+  width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary);
+  border-radius: 4px;
 }
 
 /* TOAST */
-.toast{
-  position: fixed;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 14px 22px;
-  background:#18211c;
-  color:#d7f7e9;
-  border:1px solid #245f4c;
-  border-radius:10px;
-  display:none;
-  font-weight:600;
-  z-index:9999;
-  min-width:280px;
-  text-align:center;
-  box-shadow:0 8px 25px rgba(0,0,0,0.4);
-  animation: fadeSlide 0.3s ease-out;
+.toast {
+  position: fixed; bottom: 40px; right: 40px; padding: 16px 24px; border-radius: 12px;
+  background: var(--bg-card); border: 1px solid var(--border); box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+  color: var(--text-main); font-weight: 500; transform: translateY(100px); transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  z-index: 999; display: flex; align-items: center; gap: 12px;
 }
-
-.toast.error{
-  background:#2a1616;
-  color:#ffd2d2;
-  border-color:#733;
-}
-
-@keyframes fadeSlide {
-  from { opacity:0; transform:translate(-50%, -10px); }
-  to { opacity:1; transform:translate(-50%, 0); }
-}
+.toast.visible { transform: translateY(0); }
+.toast.success { border-left: 4px solid var(--success); }
+.toast.error { border-left: 4px solid var(--danger); }
 
 </style>
 </head>
-
-
 <body>
 
 <div class="navbar">
-  <div class="brand">RBAC Admin</div>
-  <div class="nav-user">Admin Panel</div>
+  <div class="brand">
+      <img src="/logo.svg" class="brand-logo" alt="Lumina">
+      <div class="brand-name">LUMINA</div>
+      <div class="brand-badge">ADMIN</div>
+  </div>
+  <a href="/" class="nav-back">Return to Workspace</a>
 </div>
 
 <div class="container">
 
-  <!-- MAIN FORM -->
-  <form id="adminForm" class="card">
+  <!-- TABS -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('users')">User Management</button>
+    <button class="tab-btn" onclick="switchTab('roles')">Access Control Matrix</button>
+  </div>
 
-    <h2 class="card-title">Add User & Assign Access</h2>
-    <p class="card-sub">Fill all fields, then save. Everything is written in a single atomic transaction.</p>
+  <!-- TAB 1: USER ASSIGNMENT -->
+  <div id="tab-users" class="tab-content active">
+    <div class="card">
+      <div class="card-header">
+        <h2>Configure User Access</h2>
+        <p>Manage user identities and their project assignments. Enter the user details below.</p>
+      </div>
+      
+      <form id="userForm">
+        <div class="form-grid">
+          <div class="form-field">
+            <label>Email Address</label>
+            <input type="email" id="userEmail" required placeholder="name@ariqt.com" autocomplete="off" pattern="[a-zA-Z0-9._%+-]+@ariqt\.com$" title="Only @ariqt.com emails are allowed">
+          </div>
+          <div class="form-field">
+            <label>Full Name</label>
+            <input type="text" id="userName" required placeholder="e.g. John Doe" autocomplete="off">
+          </div>
+        </div>
 
-    <!-- USER INFO -->
-    <section class="section">
-      <h3 class="section-title">User Information</h3>
+        <div style="margin: 30px 0 15px; display:flex; justify-content:space-between; align-items:center;">
+          <label style="font-size:14px; font-weight:700; color:var(--text-main); text-transform:uppercase; letter-spacing:0.5px;">Assigned Projects</label>
+          <span id="projectCount" style="font-size:13px; color:var(--text-muted);">0 assigned</span>
+        </div>
+        
+        <div id="grantsContainer">
+          <!-- Dynamic Rows -->
+        </div>
 
-      <div class="form-row">
+        <button type="button" id="addProjectBtn" class="btn btn-secondary" onclick="addGrantRow()" style="margin-top: 10px; width:100%; border-style:dashed; padding: 16px;">
+          + Grant Access to Another Project
+        </button>
+
+        <div style="margin-top: 40px; padding-top:20px; border-top:1px solid var(--border); text-align: right;">
+          <button type="submit" class="btn btn-primary">Save User Configuration</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- TAB 2: ROLE DEFINITIONS -->
+  <div id="tab-roles" class="tab-content">
+    <div class="card">
+      <div class="card-header">
+        <h2>Role Permissions</h2>
+        <p>Define granular data access policies for each role. Select a project and role to edit permissions.</p>
+      </div>
+      
+      <div class="form-grid">
         <div class="form-field">
-          <label>Email <span>*</span></label>
-          <input id="userEmail" type="email" required>
+          <label>Project Scope</label>
+          <select id="permProject" onchange="loadPermissions()">
+            <option value="">-- Select Project --</option>
+          </select>
         </div>
         <div class="form-field">
-          <label>Full Name <span>*</span></label>
-          <input id="userName" type="text" required>
+          <label>Target Role</label>
+          <select id="permRole" onchange="loadPermissions()">
+            <option value="">-- Select Role --</option>
+          </select>
         </div>
       </div>
-    </section>
 
-    <hr>
+      <div id="permEditor" style="display:none; animation: fadeIn 0.4s ease;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+           <label style="font-size:14px; font-weight:600; color:var(--text-muted);">Table Permissions</label>
+           <div style="display:flex; gap:10px;">
+             <button type="button" class="btn btn-secondary" style="padding:8px 16px; font-size:13px" onclick="permBulk(true, false)">Check All Read</button>
+             <button type="button" class="btn btn-secondary" style="padding:8px 16px; font-size:13px" onclick="permBulk(false, false)">Uncheck All Read</button>
+           </div>
+        </div>
 
-    <!-- PROJECT SELECTION -->
-    <section class="section">
-      <h3 class="section-title">Select Projects (Max 2)</h3>
-      <div id="projectList" class="project-checkbox-list"></div>
-    </section>
+        <div class="perm-table-wrap">
+          <table class="perm-table">
+            <thead>
+              <tr>
+                <th>Data Resource (Table)</th>
+                <th width="150" style="text-align:center;">Read Access</th>
+                <th width="150" style="text-align:center;">Self-Only Data</th>
+              </tr>
+            </thead>
+            <tbody id="permBody"></tbody>
+          </table>
+        </div>
 
-    <hr>
+        <div style="margin-top: 32px; text-align: right;">
+          <button class="btn btn-primary" onclick="savePermissions()">Update Permissions</button>
+        </div>
+      </div>
 
-    <!-- ROLE -->
-    <section class="section">
-      <h3 class="section-title">Select Role</h3>
-      <select id="roleSelect"></select>
-    </section>
-
-    <hr>
-
-    <!-- PERMISSIONS -->
-    <section class="section">
-      <h3 class="section-title">Table Permissions</h3>
-      <div id="permissionsContainer"></div>
-    </section>
-
-    <hr>
-
-    <section class="section" style="text-align:center;">
-      <button id="saveBtn" type="submit" class="primary-btn">Save User Access</button>
-    </section>
-
-  </form>
-
-  <!-- SNAPSHOT -->
-  <div class="card">
-    <h2 class="card-title">System Snapshot</h2>
-    <table class="stats-table">
-      <thead>
-        <tr>
-          <th>Users</th>
-          <th>Projects</th>
-          <th>Roles</th>
-          <th>Tables</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td id="snapUsers">—</td>
-          <td id="snapProjects">—</td>
-          <td id="snapRoles">—</td>
-          <td id="snapTables">—</td>
-        </tr>
-      </tbody>
-    </table>
+    </div>
   </div>
 
 </div>
 
-<div id="toast" class="toast"></div>
+<div id="toast" class="toast">Action Successful</div>
 
 <script>
+/* ================= STATE ================= */
+let meta = { projects: [], roles: [], tables: [] };
+let usedProjects = new Set();
 
-/* ==================================================== */
-/*                    GLOBAL STATE                       */
-/* ==================================================== */
+/* ================= INIT ================= */
+async function init() {
+  try {
+    const res = await fetch('/api/admin/bootstrap');
+    meta = await res.json();
+    
+    // Populate Role Definitions Selectors
+    populateSelect('permProject', meta.projects.map(p => p.ProjectName));
+    populateSelect('permRole', meta.roles.map(r => r.RoleName));
 
-let bootstrap = null;
-let selectedProjects = new Set();
-let tablesByProject = {};
-
-function toast(msg, type="ok"){
-  const t = document.getElementById("toast");
-  t.textContent = msg;
-  t.className = "toast" + (type==="error" ? " error" : "");
-  t.style.display = "block";
-  setTimeout(()=> t.style.display = "none", 2500);
-}
-
-/* ==================================================== */
-/*                      LOAD DATA                        */
-/* ==================================================== */
-
-async function loadBootstrap(){
-  const res = await fetch("/api/admin/bootstrap");
-  bootstrap = await res.json();
-
-  document.getElementById("snapUsers").textContent = bootstrap.users.length;
-  document.getElementById("snapProjects").textContent = bootstrap.projects.length;
-  document.getElementById("snapRoles").textContent = bootstrap.roles.length;
-  document.getElementById("snapTables").textContent = bootstrap.tables.length;
-
-  document.getElementById("roleSelect").innerHTML =
-    bootstrap.roles.map(r => `<option>${r.RoleName}</option>`).join("");
-
-  const projectList = document.getElementById("projectList");
-  projectList.innerHTML = bootstrap.projects.map(p => `
-    <label class="project-checkbox">
-      <input type="checkbox" value="${p.ProjectName}" onclick="toggleProject(this)">
-      ${p.ProjectName}
-    </label>
-  `).join("");
-
-  tablesByProject = {};
-  bootstrap.projects.forEach(p => {
-    tablesByProject[p.ProjectName] =
-      bootstrap.tables
-        .filter(t => t.ProjectName === p.ProjectName)
-        .map(t => t.TableName);
-  });
-}
-
-/* ==================================================== */
-/*              PROJECT SELECTION LOGIC                 */
-/* ==================================================== */
-
-function toggleProject(cb){
-  if(cb.checked){
-    if(selectedProjects.size === 2){
-      cb.checked = false;
-      toast("You can select only 2 projects.", "error");
-      return;
-    }
-    selectedProjects.add(cb.value);
-  } else {
-    selectedProjects.delete(cb.value);
+    // Initialize User Tab
+    addGrantRow(); 
+    updateProjectUI();
+  } catch (e) {
+    showToast("Failed to load system data", false);
   }
-  renderPermissionSections();
 }
 
-/* ==================================================== */
-/*              PERMISSION SECTIONS UI                  */
-/* ==================================================== */
+function populateSelect(id, items) {
+  const el = document.getElementById(id);
+  el.innerHTML = '<option value="">-- Select --</option>' + 
+    items.map(i => `<option value="${i}">${i}</option>`).join('');
+}
 
-function renderPermissionSections(){
-  const container = document.getElementById("permissionsContainer");
-  container.innerHTML = "";
+/* ================= TABS ================= */
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  
+  document.querySelector(`.tab-btn[onclick="switchTab('${tab}')"]`).classList.add('active');
+  document.getElementById(`tab-${tab}`).classList.add('active');
+}
 
-  [...selectedProjects].forEach(project => {
-    const tables = tablesByProject[project] || [];
+/* ================= USER MANAGEMENT LOGIC ================= */
+function addGrantRow(selectedProject = "", selectedRole = "") {
+  // 1. Validation: Max Projects
+  if (document.querySelectorAll('.grant-row').length >= meta.projects.length) {
+    return;
+  }
 
-    const section = document.createElement("div");
-    section.className = "perm-section";
+  const container = document.getElementById('grantsContainer');
+  const div = document.createElement('div');
+  div.className = 'grant-row';
+  
+  const projectOptions = meta.projects.map(p => 
+    `<option value="${p.ProjectName}" ${p.ProjectName === selectedProject ? 'selected' : ''}>${p.ProjectName}</option>`
+  ).join('');
+  
+  const roleOptions = meta.roles.map(r => 
+    `<option>${r.RoleName}</option>`
+  ).join('');
 
-    section.innerHTML = `
-      <div class="perm-title">${project}</div>
+  div.innerHTML = `
+    <div style="flex:1">
+      <label style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px; font-weight:600;">Project</label>
+      <div class="form-field" style="margin-bottom:0;"><select class="grant-project" onchange="validateProjects()">${projectOptions}</select></div>
+    </div>
+    <div style="flex:1">
+      <label style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px; font-weight:600;">Assigned Role</label>
+      <div class="form-field" style="margin-bottom:0;"><select class="grant-role">${roleOptions}</select></div>
+    </div>
+    <button type="button" class="btn-remove" onclick="removeRow(this)" title="Remove Access">✕</button>
+  `;
+  
+  container.appendChild(div);
+  updateProjectUI();
+}
 
-      <div class="perm-actions">
-        <button type="button" class="perm-btn" onclick="selectAllRead('${project}')">Select All Read</button>
-        <button type="button" class="perm-btn" onclick="selectAllSelf('${project}')">Select All Self</button>
-        <button type="button" class="perm-btn danger" onclick="clearAllPerms('${project}')">Clear All</button>
-      </div>
+function removeRow(btn) {
+  btn.closest('.grant-row').remove();
+  updateProjectUI();
+}
 
-      <table class="perm-table">
-        <thead>
-          <tr>
-            <th>Table</th>
-            <th>Can Read</th>
-            <th>Self-Only</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${tables.map(t => `
-            <tr>
-              <td>${t}</td>
-              <td><input type="checkbox" class="perm-read" data-project="${project}" data-table="${t}"></td>
-              <td><input type="checkbox" class="perm-self" data-project="${project}" data-table="${t}"></td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    `;
+function updateProjectUI() {
+  const rowCount = document.querySelectorAll('.grant-row').length;
+  const max = meta.projects.length;
+  
+  document.getElementById('projectCount').textContent = `${rowCount} / ${max} projects assigned`;
+  
+  const btn = document.getElementById('addProjectBtn');
+  if (rowCount >= max) {
+    btn.disabled = true;
+    btn.textContent = "All Available Projects Assigned";
+  } else {
+    btn.disabled = false;
+    btn.textContent = "+ Grant Access to Another Project";
+  }
+}
 
-    container.appendChild(section);
+function validateProjects() {
+  const selects = document.querySelectorAll('.grant-project');
+  const selected = new Set();
+  let hasDup = false;
+
+  selects.forEach(s => {
+    if (selected.has(s.value)) hasDup = true;
+    selected.add(s.value);
   });
+
+  if (hasDup) {
+    showToast("Warning: You selected the same project twice.", false);
+  }
 }
 
-/* ==================================================== */
-/*         SELECT ALL / CLEAR PERMISSION BUTTONS        */
-/* ==================================================== */
-
-function selectAllRead(project){
-  document.querySelectorAll(`.perm-read[data-project="${project}"]`)
-    .forEach(cb => cb.checked = true);
-}
-
-function selectAllSelf(project){
-  document.querySelectorAll(`.perm-self[data-project="${project}"]`)
-    .forEach(cb => cb.checked = true);
-}
-
-function clearAllPerms(project){
-  document.querySelectorAll(`.perm-read[data-project="${project}"]`)
-    .forEach(cb => cb.checked = false);
-
-  document.querySelectorAll(`.perm-self[data-project="${project}"]`)
-    .forEach(cb => cb.checked = false);
-}
-
-/* ==================================================== */
-/*                   SAVE FINAL FORM                    */
-/* ==================================================== */
-
-document.getElementById("adminForm").onsubmit = async (e)=>{
+/* API: SAVE USER */
+document.getElementById('userForm').onsubmit = async (e) => {
   e.preventDefault();
+  
+  const email = document.getElementById('userEmail').value.trim();
+  const name = document.getElementById('userName').value.trim();
+  
+  // Validation
+  if (!email || !name) { showToast("Email and Name are required", false); return; }
+  
+  // Gather Grants
+  const grants = [];
+  const seenProjects = new Set();
+  let error = null;
 
-  const email = document.getElementById("userEmail").value.trim();
-  const name  = document.getElementById("userName").value.trim();
-  const role  = document.getElementById("roleSelect").value;
-
-  if(!email.endsWith("@ariqt.com")){
-    toast("Email must be an @ariqt.com address.", "error");
-    return;
-  }
-
-  if(!email || !name){
-    toast("Please fill all required fields.", "error");
-    return;
-  }
-
-  if(selectedProjects.size === 0){
-    toast("Select at least 1 project.", "error");
-    return;
-  }
-
-  if(selectedProjects.size > 2){
-    toast("You can select only 1 or 2 projects.", "error");
-    return;
-  }
-
-  const grants = [...selectedProjects].map(p => ({
-    project:p,
-    role:role
-  }));
-
-  const permissions = [];
-  document.querySelectorAll(".perm-read").forEach(chk => {
-    const project = chk.dataset.project;
-    const table = chk.dataset.table;
-    const canRead = chk.checked;
-    const canSelf =
-      document.querySelector(`.perm-self[data-project="${project}"][data-table="${table}"]`).checked;
-
-    if(canRead || canSelf){
-      permissions.push({
-        role: role,
-        project: project,
-        table: table,
-        canRead: canRead,
-        canReadSelf: canSelf
-      });
-    }
+  document.querySelectorAll('.grant-row').forEach(row => {
+    const p = row.querySelector('.grant-project').value;
+    const r = row.querySelector('.grant-role').value;
+    
+    if (seenProjects.has(p)) error = `Duplicate project selected: ${p}`;
+    seenProjects.add(p);
+    
+    grants.push({ project: p, role: r });
   });
 
-  const payload = {
-    user: { email, name },
-    grants,
-    permissions
-  };
+  if (error) { showToast(error, false); return; }
+  if (grants.length === 0) { showToast("Please assign at least one project", false); return; }
 
-  const res = await fetch("/api/admin/save-all", {
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify(payload)
-  });
-
-  const data = await res.json();
-
-  if(!res.ok){
-    toast(data.error || "Save failed", "error");
-  } else {
-    toast("Saved successfully");
-    document.getElementById("adminForm").reset();
-    selectedProjects.clear();
-    renderPermissionSections();
-    loadBootstrap();
+  try {
+    const res = await fetch('/api/admin/assign-user', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ email, name, grants })
+    });
+    const data = await res.json();
+    
+    if (data.error) throw new Error(data.error);
+    
+    showToast('User Configuration Saved Successfully!', true);
+    
+  } catch (err) {
+    showToast(err.message, false);
   }
 };
 
-/* ==================================================== */
-/*                     INIT LOAD                        */
-/* ==================================================== */
+/* ================= PERMISSION EDITOR LOGIC ================= */
+async function loadPermissions() {
+  const project = document.getElementById('permProject').value;
+  const role = document.getElementById('permRole').value;
+  const editor = document.getElementById('permEditor');
+  
+  if (!project || !role) {
+    editor.style.display = 'none';
+    return;
+  }
+  
+  // Filter tables
+  const projectTables = meta.tables.filter(t => t.ProjectName === project).map(t => t.TableName);
+  
+  // Fetch existing
+  const res = await fetch(`/api/admin/role-permissions?project=${encodeURIComponent(project)}&role=${encodeURIComponent(role)}`);
+  const currentPerms = await res.json();
+  const permMap = {};
+  currentPerms.forEach(p => { permMap[p.TableName] = p; });
+  
+  const tbody = document.getElementById('permBody');
+  if (projectTables.length === 0) {
+     tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding:30px; color:var(--text-muted);">No tables found for this project.</td></tr>';
+  } else {
+    tbody.innerHTML = projectTables.map(t => {
+      const p = permMap[t] || { CanRead: false, CanReadSelf: false };
+      return `
+        <tr>
+          <td><span style="font-family:monospace; font-size:14px;">${t}</span></td>
+          <td style="text-align:center;">
+            <input type="checkbox" class="cb-read" data-table="${t}" ${p.CanRead ? 'checked' : ''}>
+          </td>
+          <td style="text-align:center;">
+            <input type="checkbox" class="cb-self" data-table="${t}" ${p.CanReadSelf ? 'checked' : ''}>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+  
+  editor.style.display = 'block';
+}
 
-loadBootstrap();
+function permBulk(checked, isSelf) {
+  const cls = isSelf ? '.cb-self' : '.cb-read';
+  document.querySelectorAll(cls).forEach(cb => cb.checked = checked);
+}
+
+async function savePermissions() {
+  const project = document.getElementById('permProject').value;
+  const role = document.getElementById('permRole').value;
+  
+  const permissions = [];
+  document.querySelectorAll('#permBody tr').forEach(row => {
+    if (!row.querySelector('.cb-read')) return;
+
+    const table = row.querySelector('.cb-read').dataset.table;
+    const canRead = row.querySelector('.cb-read').checked;
+    const canReadSelf = row.querySelector('.cb-self').checked;
+    
+    if (canRead || canReadSelf) {
+      permissions.push({ table, canRead, canReadSelf });
+    }
+  });
+  
+  try {
+    const res = await fetch('/api/admin/update-permissions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ project, role, permissions })
+    });
+    const data = await res.json();
+    
+    if (data.error) throw new Error(data.error);
+    showToast('Role Permissions Updated Successfully!', true);
+    
+  } catch (err) {
+    showToast(err.message, false);
+  }
+}
+
+/* ================= UTILS ================= */
+function showToast(msg, success) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast visible ${success ? 'success' : 'error'}`;
+  setTimeout(() => t.classList.remove('visible'), 3000);
+}
+
+// Start
+init();
 
 </script>
-
 </body>
 </html>

@@ -325,14 +325,14 @@ def api_chat():
     
     # 3.5) Enterprise Privacy Guard (Intelligent RBAC Enforcement)
     # Check if any selected table has 'CanReadSelf' but NOT 'CanRead' (Global Read)
-    restricted_tables = [t for t in selected_tables if t in perm_map and perm_map[t][1] and not perm_map[t][0]]
+    # Or if we want to be extra strict, apply to any table where CanReadSelf is True
+    restricted_tables = [t for t in selected_tables if t in perm_map and perm_map[t][1] and not (is_admin or current_role.lower() in ["admin", "cto", "hr"])]
     
-    if restricted_tables and not is_admin:
+    if restricted_tables:
         user_name = rbac.get_user_name(email)
         q_lower = question.lower()
         
         # Determine if the query is strictly about the logged-in user
-        # Check for self-referential keywords or the user's own name/email
         self_keywords = ["my", "me", "mine", "self", "i ", "i'm"]
         is_self_query = any(word in q_lower for word in self_keywords)
         
@@ -341,16 +341,11 @@ def api_chat():
         if user_name and user_name.lower() in q_lower:
             is_self_query = True
             
-        # Detect if they are asking about someone ELSE specifically
-        # If they mention an email that isn't theirs, or if they don't mention themselves but ask for salary/etc.
-        other_emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', q_lower)
-        if other_emails and any(e != email.lower() for e in other_emails):
-            is_self_query = False
-
+        # If they didn't mention themselves, and aren't an admin, block it for safety
         if not is_self_query:
             table_list = ", ".join(restricted_tables)
             return jsonify({
-                "error": f"🔒 **Access Restricted**: You are only authorized to view your personal data in: {table_list}. Your query appears to request information about other entities or general data which is not permitted under current policy."
+                "error": f"🔒 **Access Restricted**: Your current profile is restricted to 'Self-Service' mode for: {table_list}. You cannot query information belonging to other employees or general records."
             }), 403
 
     conversational_intents = {

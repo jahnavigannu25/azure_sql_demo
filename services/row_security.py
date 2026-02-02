@@ -71,9 +71,9 @@ def apply_row_level_security(sql, perm_map, email, role):
                 owner_col = "Email" # Standard enterprise convention
             
             if matched_table.lower() == "permissions":
-                cond = f"{final_alias}.RoleName = '{role}'"
+                cond = f"LOWER({final_alias}.RoleName) = LOWER('{role}')"
             else:
-                cond = f"{final_alias}.{owner_col} = '{email}'"
+                cond = f"LOWER({final_alias}.{owner_col}) = LOWER('{email}')"
             
             conditions.append(cond)
 

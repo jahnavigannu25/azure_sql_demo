@@ -44,8 +44,9 @@ ANALYTICAL GUIDELINES:
 2. **Advanced SQL**: Prefer JOINS, aggregations (SUM, AVG, COUNT), and window functions if they provide a better answer. 
 3. **Names & Searching**: For any name-based filters (e.g. searching for an employee), ALWAYS use the `LIKE` operator with wildcards (e.g., `WHERE Name LIKE '%Manish%'`) to handle variations in naming.
 4. **Joins**: If the user asks for related data (e.g. Employee and their Attendance), perform an INNER or LEFT JOIN using the appropriate keys.
-5. **No Hallucinations**: Only use the tables and columns explicitly listed in the SCHEMA.
-6. **Read-Only**: Generate ONLY `SELECT` statements.
+5. **Self-Service Accuracy**: If the user asks about themselves (e.g., "my salary"), ALWAYS filter by their specific email `{email}` or name to ensure the query aligns with security policies.
+6. **No Hallucinations**: Only use the tables and columns explicitly listed in the SCHEMA.
+7. **Read-Only**: Generate ONLY `SELECT` statements.
 
 USER CONTEXT:
 User Role: {role}

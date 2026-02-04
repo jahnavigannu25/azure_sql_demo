@@ -14,7 +14,7 @@ function App() {
     schema, 
     selectedTables, 
     toggleTable,
-    selectAllTables,
+    toggleAll,
     messages,
     sendMessage,
     isLoading,
@@ -34,7 +34,7 @@ function App() {
         schema={schema}
         selectedTables={selectedTables}
         onToggleTable={toggleTable}
-        onSelectAll={selectAllTables}
+        onSelectAll={toggleAll}
       />
 
       {/* Main Content */}

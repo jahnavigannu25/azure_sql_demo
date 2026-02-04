@@ -117,8 +117,18 @@ export function useChat() {
     );
   };
 
-  const selectAllTables = () => setSelectedTables(schema);
-  const deselectAllTables = () => setSelectedTables([]);
+  const toggleAll = () => {
+    console.log('toggleAll called. current selected:', selectedTables.length, 'schema:', schema.length);
+    if (selectedTables.length > 0) {
+      setSelectedTables([]);
+    } else {
+      setSelectedTables(schema);
+    }
+  };
+
+  useEffect(() => {
+    console.log('Selected Tables updated:', selectedTables);
+  }, [selectedTables]);
 
   return {
     user,
@@ -128,8 +138,7 @@ export function useChat() {
     schema,
     selectedTables,
     toggleTable,
-    selectAllTables,
-    deselectAllTables,
+    toggleAll,
     messages,
     sendMessage,
     isLoading,

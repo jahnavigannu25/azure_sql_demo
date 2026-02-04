@@ -278,7 +278,9 @@ def api_chat():
     if is_admin:
         current_role = "Admin"
     elif not current_role_info:
-        return jsonify({"error":f"You do not have access to project: {project}"}), 403
+        return jsonify({
+            "error": f"👋 **Hello!** It seems you don't have access to the **{project}** workspace yet. Please reach out to your IT administrator or manager to request permission."
+        }), 403
     else:
         current_role = current_role_info["role"].strip()
     
@@ -294,13 +296,13 @@ def api_chat():
 
     if not selected_tables:
         return jsonify({
-            "error": "⚠ Please select at least one table before asking your question."
+            "error": "✨ **Ready to start?** Please select one or more tables from the sidebar so I can help you with your analysis."
         }), 400
 
     # 3. Determine tables to show LLM
     # Privileged users see full engine schema for selected tables
     # Restricted users see only what perms allow
-    is_privileged = current_role.lower() in ["admin", "cto", "manager", "techlead"]
+    is_privileged = current_role.lower() in ["admin", "cto", "manager", "techlead", "hr"]
 
     schema_rows = []
     for t in all_engine_tables:
@@ -326,9 +328,9 @@ def api_chat():
     # 3.5) Enterprise Privacy Guard (Intelligent RBAC Enforcement)
     # Check if any selected table has 'CanReadSelf' but NOT 'CanRead' (Global Read)
     # Or if we want to be extra strict, apply to any table where CanReadSelf is True
-    restricted_tables = [t for t in selected_tables if t in perm_map and perm_map[t][1] and not (is_admin or current_role.lower() in ["admin", "cto", "hr"])]
+    restricted_tables = [t for t in selected_tables if t in perm_map and perm_map[t][1] and not (is_admin or current_role.lower() in ["admin", "cto", "hr", "manager", "techlead"])]
     
-    if restricted_tables:
+    if project == "EmployeeDB_Test" and restricted_tables:
         user_name = rbac.get_user_name(email)
         q_lower = question.lower()
         
@@ -345,19 +347,25 @@ def api_chat():
         if not is_self_query:
             table_list = ", ".join(restricted_tables)
             return jsonify({
-                "error": f"🔒 **Access Restricted**: Your current profile is restricted to 'Self-Service' mode for: {table_list}. You cannot query information belonging to other employees or general records."
+                "error": f"🔒 **Privacy Shield**: Your access to **{table_list}** is configured for personal records only. To view this information, please rephrase your question to focus on your own data."
+            }), 403
+    elif project == "Sales" and not is_privileged:
+        # Check if they have access to Sales data at all
+        if not any(p.get("CanRead") for p in perms):
+             return jsonify({
+                "error": "🚫 **Access Limited**: You currently don't have permission to query Sales data. If you require this for your role, please submit an access request through the support portal."
             }), 403
 
     conversational_intents = {
-        "hi": "Hello! Ready to dive into your data?",
-        "hello": "Hi there! What can I help you analyze today?",
-        "hey": "Hey! I'm listening.",
-        "good morning": "Good morning! Let's get to work.",
-        "how are you": "I'm functioning perfectly and ready to run some queries for you! How can I help?",
-        "who are you": "I am your AI Data Assistant, designed to help you query and understand your Azure SQL data securely.",
-        "what can you do": "I can query your database, summarize results, and help you find insights in tables like " + (", ".join(selected_tables[:3]) if selected_tables else "your project tables") + ".",
-        "thanks": "You're welcome! Let me know if you need anything else.",
-        "thank you": "You're welcome! Happy to help."
+        "hi": "Hello! I'm your AI data assistant. How can I help you today?",
+        "hello": "Hi there! Ready to dive into the data? What's on your mind?",
+        "hey": "Hey! I'm here to help with your data queries.",
+        "good morning": "Good morning! I hope you're having a great day. How can I assist you?",
+        "how are you": "I'm doing great, thank you for asking! I'm ready to help you analyze some data. What can I do for you?",
+        "who are you": "I am Lumina, your specialized AI Data Assistant. I can help you query and understand your Azure SQL data securely and efficiently.",
+        "what can you do": "I can help you explore your database tables, perform complex joins, calculate metrics, and provide summaries. Just select the tables you're interested in and ask away!",
+        "thanks": "You're very welcome! Let me know if you have more questions.",
+        "thank you": "Happy to help! Feel free to ask anything else."
     }
 
     if q_norm in conversational_intents:
@@ -376,7 +384,9 @@ def api_chat():
     try:
         sql = llm_service.generate_sql(schema_text, question, email, current_role)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({
+            "error": "🧠 **Processing Insight**: I encountered a bit of trouble generating the query. Could you try rephrasing your question or checking the selected tables?"
+        }), 500
 
     # 5) Safety & RBAC
     # Ensure referenced tables are permitted
@@ -401,27 +411,31 @@ def api_chat():
         
         if deselected:
             return jsonify({
-                "error": f"⚠ **Table Not Selected**: The generated query uses tables you haven't selected: {', '.join(deselected)}. Please select them in the sidebar to include them in your analysis."
+                "error": f"💡 **Refinement Needed**: To provide an accurate answer, I need to look at: **{', '.join(deselected)}**. Please select these in the sidebar and try your question again."
             }), 400
             
         if no_permission:
             msg = (
-                "🚫 **Access Denied**\n\n"
-                f"You do not have permission to access the following tables: {', '.join(no_permission)}\n"
+                "🔒 **Access Restricted**\n\n"
+                f"I'm sorry, but your current permissions don't allow access to: **{', '.join(no_permission)}**. Please contact your workspace administrator if you believe this is an error."
             )
             return jsonify({"error": msg, "sql": sql}), 403
 
     # Apply Row-Level Security with ROLE awareness
     try:
-        sql = apply_row_level_security(sql, perm_map, email, current_role)
+        sql = apply_row_level_security(sql, perm_map, email, current_role, project)
     except PermissionError as pe:
-        return jsonify({"error": str(pe), "sql": sql}), 403
+        return jsonify({
+            "error": f"⚠️ **Security Guard**: {str(pe)}"
+        }), 403
 
     # 6) Execute
     try:
         rows = run_sql(engine, sql)
     except Exception as e:
-        return jsonify({"error": f"Query failed: {e}", "sql": sql}), 500
+        return jsonify({
+            "error": "⚙️ **Technical Hiccup**: I ran into an issue while retrieving the data. Please try again in a few moments, or reach out to support if the issue persists."
+        }), 500
 
     table_html = format_table(rows)
 

@@ -31,25 +31,23 @@ class LLMService:
         """Check for dangerous keywords."""
         return bool(self.DANGEROUS_PATTERN.search(sql))
 
-    def generate_sql(self, schema_text: str, question: str, email: str, role: str) -> str:
+    def generate_sql(self, schema_text: str, question: str, email: str) -> str:
         """
         Generate T-SQL query based on schema and question.
-        Trusts the downstream RLS layer for row-level security.
+        Enforces strict project isolation.
         """
         prompt = f"""
-You are an elite T-SQL Architect specializing in Azure SQL. Your task is to transform natural language questions into highly accurate, efficient, and read-only T-SQL queries.
+You are a highly restricted T-SQL Query Generator for an Azure SQL Database.
+You are interacting with the database for a specific project. 
 
-MISSION-CRITICAL RULES:
-1. **Schema Adherence**: Use ONLY the tables and columns provided in the SCHEMA. If a question cannot be answered with the available schema, do not hallucinate; provide the best possible query using existing fields.
-2. **Naming Convention**: T-SQL uses square brackets for identifiers if they contain spaces or are reserved keywords (e.g., `[Order]`).
-3. **Fuzzy Matching**: For name-based or text-based filters, ALWAYS use `LIKE` with wildcards (e.g., `WHERE Name LIKE '%{question}%'`) to ensure high recall.
-4. **Security Awareness**: If the user asks about "my" records (e.g., "my sales", "my attendance"), filter the results using the user's email: `{email}`.
-5. **Advanced Analytics**: Utilize JOINS, window functions (RANK, ROW_NUMBER), and aggregations to provide deep insights.
-6. **Output Format**: Return ONLY the SQL query inside triple backticks. Do not provide explanations or commentary.
-
-USER CONTEXT:
-- Role: {role}
-- User Email: {email}
+CRITICAL SECURITY & LOGIC RULES:
+1. **Scope Isolation**: You MUST ONLY use tables and columns explicitly defined in the SCHEMA below. Do not assume the existence of any other tables. If the information cannot be found in the provided schema, reply with "I cannot answer this from the selected tables."
+2. **Read-Only**: Generate ONLY `SELECT` queries. No INSERT, UPDATE, DELETE, DROP, etc.
+3. **Data Security**: 
+   - If a table contains columns like `Email`, `UserEmail`, or `Username`, you MUST filter the query to only show data for `{email}` (e.g., `WHERE Email = '{email}'`).
+   - If no user-specific column exists, ensure the query is an aggregation (COUNT, SUM, AVG) or generic list that doesn't leak sensitive personal row data unless explicitly appropriate.
+4. **Syntax**: Use T-SQL (Microsoft SQL Server) syntax.
+5. **Output**: Return ONLY the raw SQL query inside triple backticks (```sql ... ```). No explanation, no conversational text.
 
 SCHEMA:
 {schema_text}
@@ -61,10 +59,10 @@ USER QUESTION:
             response = self.client.chat.completions.create(
                 model=self.deployment,
                 messages=[
-                    {"role": "system", "content": "You are a specialized T-SQL architect. You only return valid T-SQL code inside code blocks. You do not explain the code."},
+                    {"role": "system", "content": "You are a strict T-SQL generator. You never output anything other than valid SQL code inside code blocks."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.0
+                temperature=0.0  # Zero temperature for maximum determinism
             )
             raw_content = response.choices[0].message.content
             return self.extract_sql(raw_content)

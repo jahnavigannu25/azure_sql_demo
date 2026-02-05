@@ -28,45 +28,22 @@ class RBACService:
         return self._engine
 
     def is_admin(self, email: str) -> bool:
-        """Check if user has global admin role in Admin DB."""
+        """Check if user has global admin role or specific admin role."""
         if not email: return False
-        try:
-            with self.engine.connect() as conn:
-                # 1. Check for explicit 'Admin' role in ANY project in Admin DB
-                q = """
-                SELECT 1
-                FROM Users u
-                JOIN UserProjectRoles upr ON upr.UserID = u.UserID
-                JOIN Roles r ON r.RoleID = upr.RoleID
-                WHERE u.Email = :email AND r.RoleName = 'Admin'
-                """
-                if bool(conn.execute(text(q), {"email": email}).first()):
-                    return True
-                
-                # 2. Check for IsAdmin flag in Users table (enterprise safety)
-                col_check = "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Users' AND COLUMN_NAME = 'IsAdmin'"
-                if conn.execute(text(col_check)).first():
-                    admin_flag = conn.execute(text("SELECT IsAdmin FROM Users WHERE Email = :e"), {"e": email}).scalar()
-                    return bool(admin_flag)
-                
-                return False
-        except Exception as e:
-            print(f"Error checking admin status: {e}")
-            return False
-
-    def get_all_projects(self):
-        """Fetch all projects from Admin DB Projects table."""
         with self.engine.connect() as conn:
-            return [dict(x) for x in conn.execute(text("SELECT ProjectID, ProjectName FROM Projects ORDER BY ProjectName")).mappings().all()]
+            # Check for explicit 'Admin' role in ANY project or a global admin flag if you had one.
+            # For now, we stick to the project-based check: is there a role named 'Admin' assigned to this user?
+            q = """
+            SELECT 1
+            FROM Users u
+            JOIN UserProjectRoles upr ON upr.UserID = u.UserID
+            JOIN Roles r ON r.RoleID = upr.RoleID
+            WHERE u.Email = :email AND r.RoleName = 'Admin'
+            """
+            return bool(conn.execute(text(q), {"email": email}).first())
 
     def get_user_projects(self, email: str):
-        """Get list of projects and roles for a user. Admins see all."""
-        is_admin = self.is_admin(email)
-        
-        if is_admin:
-            all_projs = self.get_all_projects()
-            return [{"project": p["ProjectName"], "role": "Admin"} for p in all_projs]
-
+        """Get list of projects and roles for a user."""
         sql = """
         SELECT p.ProjectName, r.RoleName
         FROM Users u

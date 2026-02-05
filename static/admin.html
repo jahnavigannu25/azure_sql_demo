@@ -370,54 +370,41 @@ hr{
 <div id="toast" class="toast"></div>
 
 <script>
+/* ================= STATE ================= */
+let meta = { projects: [], roles: [], tables: [] };
+let usedProjects = new Set();
 
-/* ==================================================== */
-/*                    GLOBAL STATE                       */
-/* ==================================================== */
+/* ================= INIT ================= */
+async function init() {
+  try {
+    const res = await fetch('/api/admin/bootstrap');
+    meta = await res.json();
+    
+    // Populate Role Definitions Selectors
+    populateSelect('permProject', meta.projects.map(p => p.ProjectName));
+    populateSelect('permRole', meta.roles.map(r => r.RoleName));
 
-let bootstrap = null;
-let selectedProjects = new Set();
-let tablesByProject = {};
-
-function toast(msg, type="ok"){
-  const t = document.getElementById("toast");
-  t.textContent = msg;
-  t.className = "toast" + (type==="error" ? " error" : "");
-  t.style.display = "block";
-  setTimeout(()=> t.style.display = "none", 2500);
+    // Initialize User Tab
+    addGrantRow(); 
+    updateProjectUI();
+  } catch (e) {
+    showToast("Failed to load system data", false);
+  }
 }
 
-/* ==================================================== */
-/*                      LOAD DATA                        */
-/* ==================================================== */
+function populateSelect(id, items) {
+  const el = document.getElementById(id);
+  el.innerHTML = '<option value="">-- Select --</option>' + 
+    items.map(i => `<option value="${i}">${i}</option>`).join('');
+}
 
-async function loadBootstrap(){
-  const res = await fetch("/api/admin/bootstrap");
-  bootstrap = await res.json();
-
-  document.getElementById("snapUsers").textContent = bootstrap.users.length;
-  document.getElementById("snapProjects").textContent = bootstrap.projects.length;
-  document.getElementById("snapRoles").textContent = bootstrap.roles.length;
-  document.getElementById("snapTables").textContent = bootstrap.tables.length;
-
-  document.getElementById("roleSelect").innerHTML =
-    bootstrap.roles.map(r => `<option>${r.RoleName}</option>`).join("");
-
-  const projectList = document.getElementById("projectList");
-  projectList.innerHTML = bootstrap.projects.map(p => `
-    <label class="project-checkbox">
-      <input type="checkbox" value="${p.ProjectName}" onclick="toggleProject(this)">
-      ${p.ProjectName}
-    </label>
-  `).join("");
-
-  tablesByProject = {};
-  bootstrap.projects.forEach(p => {
-    tablesByProject[p.ProjectName] =
-      bootstrap.tables
-        .filter(t => t.ProjectName === p.ProjectName)
-        .map(t => t.TableName);
-  });
+/* ================= TABS ================= */
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  
+  document.querySelector(`.tab-btn[onclick="switchTab('${tab}')"]`).classList.add('active');
+  document.getElementById(`tab-${tab}`).classList.add('active');
 }
 
 /* ==================================================== */
@@ -513,36 +500,100 @@ function clearAllPerms(project){
 
 document.getElementById("adminForm").onsubmit = async (e)=>{
   e.preventDefault();
+  
+  const email = document.getElementById('userEmail').value.trim();
+  const name = document.getElementById('userName').value.trim();
+  
+  // Validation
+  if (!email || !name) { showToast("Email and Name are required", false); return; }
+  
+  // Gather Grants
+  const grants = [];
+  const seenProjects = new Set();
+  let error = null;
 
-  const email = document.getElementById("userEmail").value.trim();
-  const name  = document.getElementById("userName").value.trim();
-  const role  = document.getElementById("roleSelect").value;
+  document.querySelectorAll('.grant-row').forEach(row => {
+    const p = row.querySelector('.grant-project').value;
+    const r = row.querySelector('.grant-role').value;
+    
+    if (seenProjects.has(p)) error = `Duplicate project selected: ${p}`;
+    seenProjects.add(p);
+    
+    grants.push({ project: p, role: r });
+  });
 
-  if(!email.endsWith("@ariqt.com")){
-    toast("Email must be an @ariqt.com address.", "error");
+  if (error) { showToast(error, false); return; }
+  if (grants.length === 0) { showToast("Please assign at least one project", false); return; }
+
+  try {
+    const res = await fetch('/api/admin/assign-user', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ email, name, grants })
+    });
+    const data = await res.json();
+    
+    if (data.error) throw new Error(data.error);
+    
+    showToast('User Configuration Saved Successfully!', true);
+    
+  } catch (err) {
+    showToast(err.message, false);
+  }
+};
+
+/* ================= PERMISSION EDITOR LOGIC ================= */
+async function loadPermissions() {
+  const project = document.getElementById('permProject').value;
+  const role = document.getElementById('permRole').value;
+  const editor = document.getElementById('permEditor');
+  
+  if (!project || !role) {
+    editor.style.display = 'none';
     return;
   }
-
-  if(!email || !name){
-    toast("Please fill all required fields.", "error");
-    return;
+  
+  // Filter tables
+  const projectTables = meta.tables.filter(t => t.ProjectName === project).map(t => t.TableName);
+  
+  // Fetch existing
+  const res = await fetch(`/api/admin/role-permissions?project=${encodeURIComponent(project)}&role=${encodeURIComponent(role)}`);
+  const currentPerms = await res.json();
+  const permMap = {};
+  currentPerms.forEach(p => { permMap[p.TableName] = p; });
+  
+  const tbody = document.getElementById('permBody');
+  if (projectTables.length === 0) {
+     tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding:30px; color:var(--text-muted);">No tables found for this project.</td></tr>';
+  } else {
+    tbody.innerHTML = projectTables.map(t => {
+      const p = permMap[t] || { CanRead: false, CanReadSelf: false };
+      return `
+        <tr>
+          <td><span style="font-family:monospace; font-size:14px;">${t}</span></td>
+          <td style="text-align:center;">
+            <input type="checkbox" class="cb-read" data-table="${t}" ${p.CanRead ? 'checked' : ''}>
+          </td>
+          <td style="text-align:center;">
+            <input type="checkbox" class="cb-self" data-table="${t}" ${p.CanReadSelf ? 'checked' : ''}>
+          </td>
+        </tr>
+      `;
+    }).join('');
   }
+  
+  editor.style.display = 'block';
+}
 
-  if(selectedProjects.size === 0){
-    toast("Select at least 1 project.", "error");
-    return;
-  }
+function permBulk(checked, isSelf) {
+  const cls = isSelf ? '.cb-self' : '.cb-read';
+  document.querySelectorAll(cls).forEach(cb => cb.checked = checked);
+}
 
-  if(selectedProjects.size > 2){
-    toast("You can select only 1 or 2 projects.", "error");
-    return;
-  }
-
-  const grants = [...selectedProjects].map(p => ({
-    project:p,
-    role:role
-  }));
-
+async function savePermissions() {
+  const project = document.getElementById('permProject').value;
+  const role = document.getElementById('permRole').value;
+  
   const permissions = [];
   document.querySelectorAll(".perm-read").forEach(chk => {
     const project = chk.dataset.project;

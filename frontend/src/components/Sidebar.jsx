@@ -1,5 +1,5 @@
 import React from 'react';
-import { Database, Check, Square, CheckSquare, Circle, CheckCircle2, Layers, ChevronDown } from 'lucide-react';
+import { Database, CheckSquare, Square, Layers, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export function Sidebar({ 
@@ -12,9 +12,6 @@ export function Sidebar({
   onToggleTable, 
   onSelectAll 
 }) {
-  const allSelected = schema.length > 0 && selectedTables.length === schema.length;
-  const anySelected = selectedTables.length > 0;
-
   return (
     <motion.aside 
       initial={{ x: -280 }}
@@ -62,18 +59,9 @@ export function Sidebar({
             {schema.length > 0 && (
               <button 
                 onClick={onSelectAll}
-                className="text-[10px] font-bold text-brand-primary hover:text-brand-accent transition-all duration-200 tracking-wider flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-brand-primary/10 group/btn"
+                className="text-[10px] font-bold text-brand-primary hover:text-brand-accent transition-colors tracking-wider"
               >
-                <div className="relative w-3.5 h-3.5 flex items-center justify-center">
-                  {anySelected ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 absolute text-brand-primary" />
-                  ) : (
-                    <Circle className="w-3.5 h-3.5 absolute opacity-70" />
-                  )}
-                </div>
-                <span className="min-w-[85px] text-left transition-all duration-200">
-                  {anySelected ? 'UNSELECT ALL' : 'SELECT ALL'}
-                </span>
+                SELECT ALL
               </button>
             )}
           </div>
@@ -99,7 +87,7 @@ export function Sidebar({
                       w-4 h-4 rounded border flex items-center justify-center transition-all
                       ${isSelected ? 'bg-brand-primary border-brand-primary' : 'border-gray-600 group-hover:border-gray-400 bg-transparent'}
                     `}>
-                       {isSelected && <Check className="w-3 h-3 text-white" />}
+                       {isSelected && <CheckSquare className="w-3 h-3 text-white" />}
                     </div>
                     <span className="text-sm truncate font-medium">{table}</span>
                   </div>

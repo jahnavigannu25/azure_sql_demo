@@ -37,17 +37,20 @@ class LLMService:
         Enforces strict project isolation.
         """
         prompt = f"""
-You are a highly restricted T-SQL Query Generator for an Azure SQL Database.
-You are interacting with the database for a specific project. 
+You are an Expert T-SQL Data Analyst. Your goal is to provide precise, accurate, and high-performance T-SQL queries.
 
-CRITICAL SECURITY & LOGIC RULES:
-1. **Scope Isolation**: You MUST ONLY use tables and columns explicitly defined in the SCHEMA below. Do not assume the existence of any other tables. If the information cannot be found in the provided schema, reply with "I cannot answer this from the selected tables."
-2. **Read-Only**: Generate ONLY `SELECT` queries. No INSERT, UPDATE, DELETE, DROP, etc.
-3. **Data Security**: 
-   - If a table contains columns like `Email`, `UserEmail`, or `Username`, you MUST filter the query to only show data for `{email}` (e.g., `WHERE Email = '{email}'`).
-   - If no user-specific column exists, ensure the query is an aggregation (COUNT, SUM, AVG) or generic list that doesn't leak sensitive personal row data unless explicitly appropriate.
-4. **Syntax**: Use T-SQL (Microsoft SQL Server) syntax.
-5. **Output**: Return ONLY the raw SQL query inside triple backticks (```sql ... ```). No explanation, no conversational text.
+ANALYTICAL GUIDELINES:
+1. **Full Access**: Use ANY column defined in the SCHEMA to answer the question. Do NOT omit sensitive columns like Salary, Budget, or Roles; assume the user has clearance.
+2. **Advanced SQL**: Prefer JOINS, aggregations (SUM, AVG, COUNT), and window functions if they provide a better answer. 
+3. **Names & Searching**: For any name-based filters (e.g. searching for an employee), ALWAYS use the `LIKE` operator with wildcards (e.g., `WHERE Name LIKE '%Manish%'`) to handle variations in naming.
+4. **Joins**: If the user asks for related data (e.g. Employee and their Attendance), perform an INNER or LEFT JOIN using the appropriate keys.
+5. **Self-Service Accuracy**: If the user asks about themselves (e.g., "my salary"), ALWAYS filter by their specific email `{email}` or name to ensure the query aligns with security policies.
+6. **No Hallucinations**: Only use the tables and columns explicitly listed in the SCHEMA.
+7. **Read-Only**: Generate ONLY `SELECT` statements.
+
+USER CONTEXT:
+User Role: {role}
+User Email: {email}
 
 SCHEMA:
 {schema_text}
@@ -67,43 +70,43 @@ USER QUESTION:
             raw_content = response.choices[0].message.content
             return self.extract_sql(raw_content)
         except Exception as e:
-            raise Exception(f"I'm sorry, I couldn't generate the data query. Error details: {str(e)}")
+            raise Exception(f"LLM Generation Failed: {str(e)}")
 
     def summarize_results(self, question: str, rows: list) -> str:
         """
         Generate a conversational summary of the data.
         """
         if not rows:
-            return "I couldn't find any data matching your request. Would you like to try a different question or select more tables?"
+            return "I found no records matching your criteria. It might be due to the current filters or permissions."
 
         # Truncate rows for token limit safety
         data_preview = json.dumps(rows[:20], default=str) 
         
         prompt = f"""
-You are Lumina, a friendly and highly professional Business Intelligence Analyst.
-Analyze the following data results and provide a clear, concise, and insightful summary for the user.
+You are a professional Business Intelligence Assistant.
+Analyze the following dataset returned by a SQL query in response to the user's question.
 
-User's Original Question: "{question}"
+User Question: "{question}"
 
-Data Result Preview (JSON):
+Data (First 20 rows):
 {data_preview}
 
-GUIDELINES:
-1. **Be Insightful**: Don't just list numbers; tell the story. For example, "Your average sales are trending up" instead of "Sales are 500."
-2. **Be Professional & Friendly**: Maintain a helpful, "Silicon Valley startup" vibe—clean, direct, and premium.
-3. **No Tech Jargon**: Never mention "SQL," "Rows," "Tables," or "Database." Talk about "records," "information," or specific business entities.
-4. **Brevity**: Keep the summary between 2 to 4 impactful sentences.
-5. **Formatting**: Use bold text for key numbers or highlights.
+Instructions:
+1. Provide a concise, high-level summary of the results.
+2. Highlight key metrics (totals, averages, trends) if visible.
+3. Use a professional, helpful tone.
+4. Do NOT mention "SQL" or technical database terms. Focus on the business insight.
+5. Keep it under 3-4 sentences.
 """
         try:
             response = self.client.chat.completions.create(
                 model=self.deployment,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.3
+                temperature=0.2
             )
             return response.choices[0].message.content.strip()
         except Exception:
-            return "I've analyzed the data and presented the results in the table below. Let me know if you need any specific insights!"
+            return "Here are the results from your query."
 
 llm_service = LLMService()
 

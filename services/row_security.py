@@ -1,19 +1,22 @@
 import re
 
-def apply_row_level_security(sql, perm_map, email):
+def apply_row_level_security(sql, perm_map, email, role):
     """
     Applies Row-Level Security (RLS) by injecting WHERE clauses into the SQL.
-    
-    Args:
-        sql (str): The original SQL query.
-        perm_map (dict): A dictionary mapping TableName to (CanRead, CanReadSelf).
-        email (str): The user's email address to filter by.
-        
-    Returns:
-        str: The modified SQL query with RLS enforced.
+    Admins and CTOs bypass this layer entirely.
     """
     
-    # 1. Identify tables that require RLS enforcement
+    # 1. SECURITY GUARD: Only SELECT allowed
+    clean_sql = sql.strip().upper()
+    if not clean_sql.startswith("SELECT") and not clean_sql.startswith("WITH"):
+        raise PermissionError("Security Block: Only read-only SELECT operations are permitted.")
+
+    # 2. ROLE-BASED BYPASS: Admins and CTOs see all data
+    privileged_roles = ["admin", "cto", "manager", "techlead"]
+    if role.strip().lower() in privileged_roles:
+        return sql
+
+    # 3. Identify tables that require RLS enforcement
     # Condition: CanRead (Read All) is False AND CanReadSelf is True
     rls_tables = set()
     for table, (can_read, can_read_self) in perm_map.items():

@@ -31,82 +31,84 @@ class LLMService:
         """Check for dangerous keywords."""
         return bool(self.DANGEROUS_PATTERN.search(sql))
 
-    def generate_sql(self, schema_text: str, question: str, email: str) -> str:
+    def generate_sql(self, schema_text: str, question: str, email: str, role: str) -> str:
         """
         Generate T-SQL query based on schema and question.
-        Enforces strict project isolation.
+        Trusts the downstream RLS layer for row-level security.
         """
         prompt = f"""
-You are an Expert T-SQL Data Analyst. Your goal is to provide precise, accurate, and high-performance T-SQL queries.
+You are an elite T-SQL Architect specializing in Azure SQL. Your task is to transform natural language questions into highly accurate, efficient, and read-only T-SQL queries.
 
-ANALYTICAL GUIDELINES:
-1. **Full Access**: Use ANY column defined in the SCHEMA to answer the question. Do NOT omit sensitive columns like Salary, Budget, or Roles; assume the user has clearance.
-2. **Advanced SQL**: Prefer JOINS, aggregations (SUM, AVG, COUNT), and window functions if they provide a better answer. 
-3. **Names & Searching**: For any name-based filters (e.g. searching for an employee), ALWAYS use the `LIKE` operator with wildcards (e.g., `WHERE Name LIKE '%Manish%'`) to handle variations in naming.
-4. **Joins**: If the user asks for related data (e.g. Employee and their Attendance), perform an INNER or LEFT JOIN using the appropriate keys.
-5. **Self-Service Accuracy**: If the user asks about themselves (e.g., "my salary"), ALWAYS filter by their specific email `{email}` or name to ensure the query aligns with security policies.
-6. **No Hallucinations**: Only use the tables and columns explicitly listed in the SCHEMA.
-7. **Read-Only**: Generate ONLY `SELECT` statements.
+MISSION-CRITICAL RULES:
+1. **Schema Adherence**: Use ONLY the tables and columns provided in the SCHEMA below. 
+   - DO NOT hallucinate table names inside your query.
+   - DO NOT use placeholders like 'YourTable' or '[YourTable]'.
+   - If the schema is empty or insufficient, return "NO_SQL".
+   - If the user asks for a summary of "selected tables", SELECT the top 5 rows from each valid table found in the schema to provide a preview.
+2. **Naming Convention**: T-SQL uses square brackets for identifiers if they contain spaces or are reserved keywords (e.g., `[Order]`).
+3. **Fuzzy Matching**: For name-based or text-based filters, ALWAYS use `LIKE` with wildcards (e.g., `WHERE Name LIKE '%{{question}}%'`) to ensure high recall.
+4. **Security Awareness**: If the user asks about "my" records (e.g., "my sales", "my attendance"), filter the results using the user's email: `{{email}}`.
+5. **Advanced Analytics**: Utilize JOINS, window functions (RANK, ROW_NUMBER), and aggregations to provide deep insights.
+6. **Output Format**: Return ONLY the SQL query inside triple backticks. Do not provide explanations or commentary.
 
 USER CONTEXT:
-User Role: {role}
-User Email: {email}
+- Role: {{role}}
+- User Email: {{email}}
 
 SCHEMA:
-{schema_text}
+{{schema_text}}
 
 USER QUESTION:
-{question}
+{{question}}
 """
         try:
             response = self.client.chat.completions.create(
                 model=self.deployment,
                 messages=[
-                    {"role": "system", "content": "You are a strict T-SQL generator. You never output anything other than valid SQL code inside code blocks."},
+                    {"role": "system", "content": "You are a specialized T-SQL architect. You only return valid T-SQL code inside code blocks. You do not explain the code."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.0  # Zero temperature for maximum determinism
+                temperature=0.0
             )
             raw_content = response.choices[0].message.content
             return self.extract_sql(raw_content)
         except Exception as e:
-            raise Exception(f"LLM Generation Failed: {str(e)}")
+            raise Exception(f"I'm sorry, I couldn't generate the data query. Error details: {str(e)}")
 
     def summarize_results(self, question: str, rows: list) -> str:
         """
         Generate a conversational summary of the data.
         """
         if not rows:
-            return "I found no records matching your criteria. It might be due to the current filters or permissions."
+            return "I couldn't find any data matching your request. Would you like to try a different question or select more tables?"
 
         # Truncate rows for token limit safety
         data_preview = json.dumps(rows[:20], default=str) 
         
         prompt = f"""
-You are a professional Business Intelligence Assistant.
-Analyze the following dataset returned by a SQL query in response to the user's question.
+You are Lumina, a friendly and highly professional Business Intelligence Analyst.
+Analyze the following data results and provide a clear, concise, and insightful summary for the user.
 
-User Question: "{question}"
+User's Original Question: "{{question}}"
 
-Data (First 20 rows):
-{data_preview}
+Data Result Preview (JSON):
+{{data_preview}}
 
-Instructions:
-1. Provide a concise, high-level summary of the results.
-2. Highlight key metrics (totals, averages, trends) if visible.
-3. Use a professional, helpful tone.
-4. Do NOT mention "SQL" or technical database terms. Focus on the business insight.
-5. Keep it under 3-4 sentences.
+GUIDELINES:
+1. **Be Insightful**: Don't just list numbers; tell the story. For example, "Your average sales are trending up" instead of "Sales are 500."
+2. **Be Professional & Friendly**: Maintain a helpful, "Silicon Valley startup" vibe—clean, direct, and premium.
+3. **No Tech Jargon**: Never mention "SQL," "Rows," "Tables," or "Database." Talk about "records," "information," or specific business entities.
+4. **Brevity**: Keep the summary between 2 to 4 impactful sentences.
+5. **Formatting**: Use bold text for key numbers or highlights.
 """
         try:
             response = self.client.chat.completions.create(
                 model=self.deployment,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.2
+                temperature=0.3
             )
             return response.choices[0].message.content.strip()
         except Exception:
-            return "Here are the results from your query."
+            return "I've analyzed the data and presented the results in the table below. Let me know if you need any specific insights!"
 
 llm_service = LLMService()
-

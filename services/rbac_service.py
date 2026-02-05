@@ -27,23 +27,150 @@ class RBACService:
                 self._engine = create_engine(conn_str, poolclass=NullPool, future=True)
         return self._engine
 
+    def ensure_schema(self):
+        """Create necessary tables if they don't exist."""
+        try:
+            with self.engine.begin() as conn:
+                # Projects
+                conn.execute(text("""
+                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Projects')
+                    CREATE TABLE Projects (
+                        ProjectID INT IDENTITY(1,1) PRIMARY KEY,
+                        ProjectName NVARCHAR(255) UNIQUE NOT NULL
+                    )
+                """))
+                
+                # Roles
+                conn.execute(text("""
+                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Roles')
+                    CREATE TABLE Roles (
+                        RoleID INT IDENTITY(1,1) PRIMARY KEY,
+                        RoleName NVARCHAR(255) UNIQUE NOT NULL
+                    )
+                """))
+                
+                # Users
+                conn.execute(text("""
+                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Users')
+                    CREATE TABLE Users (
+                        UserID INT IDENTITY(1,1) PRIMARY KEY,
+                        Email NVARCHAR(255) UNIQUE NOT NULL,
+                        Name NVARCHAR(255),
+                        IsAdmin BIT DEFAULT 0
+                    )
+                """))
+
+                # UserProjectRoles
+                conn.execute(text("""
+                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'UserProjectRoles')
+                    CREATE TABLE UserProjectRoles (
+                        ID INT IDENTITY(1,1) PRIMARY KEY,
+                        UserID INT REFERENCES Users(UserID),
+                        ProjectID INT REFERENCES Projects(ProjectID),
+                        RoleID INT REFERENCES Roles(RoleID),
+                        CONSTRAINT UK_UserProject UNIQUE(UserID, ProjectID)
+                    )
+                """))
+
+                # Permissions
+                conn.execute(text("""
+                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Permissions')
+                    CREATE TABLE Permissions (
+                        ID INT IDENTITY(1,1) PRIMARY KEY,
+                        ProjectID INT REFERENCES Projects(ProjectID),
+                        RoleID INT REFERENCES Roles(RoleID),
+                        TableName NVARCHAR(255),
+                        CanRead BIT DEFAULT 0,
+                        CanReadSelf BIT DEFAULT 0,
+                        CONSTRAINT UK_Perm UNIQUE(ProjectID, RoleID, TableName)
+                    )
+                """))
+
+                # TableDirectory (Legacy/Cache)
+                conn.execute(text("""
+                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'TableDirectory')
+                    CREATE TABLE TableDirectory (
+                        ID INT IDENTITY(1,1) PRIMARY KEY,
+                        ProjectID INT REFERENCES Projects(ProjectID),
+                        TableName NVARCHAR(255)
+                    )
+                """))
+
+        except Exception as e:
+            print(f"Schema initialization error: {e}")
+
+    def seed_demo_permissions(self):
+        """Seed default permissions for demo purposes."""
+        try:
+            with self.engine.begin() as conn:
+                # 1. Get IDs
+                pid = conn.execute(text("SELECT ProjectID FROM Projects WHERE ProjectName='EmployeeDB_Test'")).scalar()
+                rid_emp = conn.execute(text("SELECT RoleID FROM Roles WHERE RoleName='Employee'")).scalar()
+                rid_mgr = conn.execute(text("SELECT RoleID FROM Roles WHERE RoleName='Manager'")).scalar()
+                
+                if not pid or not rid_emp or not rid_mgr:
+                    print("Skipping permission seed: Project/Roles not found.")
+                    return
+
+                # 2. Defaults for Employee (Read Self Only)
+                for tbl in ['Employees', 'Attendance', 'PerformanceReviews', 'Payroll']:
+                    conn.execute(text("""
+                        IF NOT EXISTS (SELECT 1 FROM Permissions WHERE ProjectID=:pid AND RoleID=:rid AND TableName=:t)
+                            INSERT INTO Permissions(ProjectID, RoleID, TableName, CanRead, CanReadSelf)
+                            VALUES(:pid, :rid, :t, 0, 1)
+                    """), {"pid": pid, "rid": rid_emp, "t": tbl})
+
+                # 3. Defaults for Manager (Full Read)
+                for tbl in ['Employees', 'Attendance', 'PerformanceReviews', 'Payroll', 'Departments']:
+                    conn.execute(text("""
+                        IF NOT EXISTS (SELECT 1 FROM Permissions WHERE ProjectID=:pid AND RoleID=:rid AND TableName=:t)
+                            INSERT INTO Permissions(ProjectID, RoleID, TableName, CanRead, CanReadSelf)
+                            VALUES(:pid, :rid, :t, 1, 1)
+                    """), {"pid": pid, "rid": rid_mgr, "t": tbl})
+
+        except Exception as e:
+            print(f"Permission seed error: {e}")
+
     def is_admin(self, email: str) -> bool:
-        """Check if user has global admin role or specific admin role."""
+        """Check if user has global admin role in Admin DB."""
         if not email: return False
+        try:
+            with self.engine.connect() as conn:
+                # 1. Check for explicit 'Admin' role in ANY project in Admin DB
+                q = """
+                SELECT 1
+                FROM Users u
+                JOIN UserProjectRoles upr ON upr.UserID = u.UserID
+                JOIN Roles r ON r.RoleID = upr.RoleID
+                WHERE u.Email = :email AND r.RoleName = 'Admin'
+                """
+                if bool(conn.execute(text(q), {"email": email}).first()):
+                    return True
+                
+                # 2. Check for IsAdmin flag in Users table (enterprise safety)
+                col_check = "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Users' AND COLUMN_NAME = 'IsAdmin'"
+                if conn.execute(text(col_check)).first():
+                    admin_flag = conn.execute(text("SELECT IsAdmin FROM Users WHERE Email = :e"), {"e": email}).scalar()
+                    return bool(admin_flag)
+                
+                return False
+        except Exception as e:
+            print(f"Error checking admin status: {e}")
+            return False
+
+    def get_all_projects(self):
+        """Fetch all projects from Admin DB Projects table."""
         with self.engine.connect() as conn:
-            # Check for explicit 'Admin' role in ANY project or a global admin flag if you had one.
-            # For now, we stick to the project-based check: is there a role named 'Admin' assigned to this user?
-            q = """
-            SELECT 1
-            FROM Users u
-            JOIN UserProjectRoles upr ON upr.UserID = u.UserID
-            JOIN Roles r ON r.RoleID = upr.RoleID
-            WHERE u.Email = :email AND r.RoleName = 'Admin'
-            """
-            return bool(conn.execute(text(q), {"email": email}).first())
+            return [dict(x) for x in conn.execute(text("SELECT ProjectID, ProjectName FROM Projects ORDER BY ProjectName")).mappings().all()]
 
     def get_user_projects(self, email: str):
-        """Get list of projects and roles for a user."""
+        """Get list of projects and roles for a user. Admins see all."""
+        is_admin = self.is_admin(email)
+        
+        if is_admin:
+            all_projs = self.get_all_projects()
+            return [{"project": p["ProjectName"], "role": "Admin"} for p in all_projs]
+
         sql = """
         SELECT p.ProjectName, r.RoleName
         FROM Users u
@@ -196,5 +323,31 @@ class RBACService:
             # Delete associations first (FKs usually require this, though CASCADE might exist, explicit is safer)
             conn.execute(text("DELETE FROM UserProjectRoles WHERE UserID=:uid"), {"uid": uid})
             conn.execute(text("DELETE FROM Users WHERE UserID=:uid"), {"uid": uid})
+
+    def sync_projects(self, project_names: list):
+        """Ensure DB Projects table matches the provided list of projects."""
+        if not project_names: return
+        try:
+            with self.engine.begin() as conn:
+                for p_name in project_names:
+                    conn.execute(text("""
+                        IF NOT EXISTS (SELECT 1 FROM Projects WHERE ProjectName = :p)
+                            INSERT INTO Projects (ProjectName) VALUES (:p)
+                    """), {"p": p_name})
+        except Exception as e:
+            print(f"Error syncing projects: {e}")
+
+    def sync_roles(self, role_names: list):
+        """Ensure DB Roles table matches the provided list of roles."""
+        if not role_names: return
+        try:
+            with self.engine.begin() as conn:
+                for r_name in role_names:
+                    conn.execute(text("""
+                        IF NOT EXISTS (SELECT 1 FROM Roles WHERE RoleName = :r)
+                            INSERT INTO Roles (RoleName) VALUES (:r)
+                    """), {"r": r_name})
+        except Exception as e:
+            print(f"Error syncing roles: {e}")
 
 rbac = RBACService()

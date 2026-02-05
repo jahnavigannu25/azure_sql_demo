@@ -1,9 +1,10 @@
 import re
 
-def apply_row_level_security(sql, perm_map, email, role):
+def apply_row_level_security(sql, perm_map, email, role, project_name=None):
     """
     Applies Row-Level Security (RLS) by injecting WHERE clauses into the SQL.
     Admins and CTOs bypass this layer entirely.
+    RLS is only enforced for the 'EmployeeDB_Test' project.
     """
     
     # 1. SECURITY GUARD: Only SELECT allowed
@@ -11,12 +12,16 @@ def apply_row_level_security(sql, perm_map, email, role):
     if not clean_sql.startswith("SELECT") and not clean_sql.startswith("WITH"):
         raise PermissionError("Security Block: Only read-only SELECT operations are permitted.")
 
-    # 2. ROLE-BASED BYPASS: Admins and CTOs see all data
+    # 2. PROJECT CHECK: Only enforce RLS for EmployeeDB_Test
+    if project_name != "EmployeeDB_Test":
+        return sql
+
+    # 3. ROLE-BASED BYPASS: Admins and CTOs see all data
     privileged_roles = ["admin", "cto", "manager", "techlead"]
     if role.strip().lower() in privileged_roles:
         return sql
 
-    # 3. Identify tables that require RLS enforcement
+    # 4. Identify tables that require RLS enforcement
     # Condition: CanRead (Read All) is False AND CanReadSelf is True
     rls_tables = set()
     for table, (can_read, can_read_self) in perm_map.items():
@@ -46,17 +51,35 @@ def apply_row_level_security(sql, perm_map, email, role):
         table_name = match.group(2)
         alias = match.group(3)
         
-        # If no explicit alias, the table name itself is the alias
+        # KEY FIX: Ensure the alias isn't actually a SQL keyword (WHERE, ON, GROUP, etc.)
+        reserved_keywords = {"WHERE", "ON", "GROUP", "ORDER", "LIMIT", "INNER", "LEFT", "RIGHT", "JOIN"}
+        if alias and alias.upper() in reserved_keywords:
+            alias = None
+            
         final_alias = alias if alias else table_name
         
-        # Check if this table is in our RLS list (case-insensitive check)
-        # We search rls_tables for a match
         matched_table = next((t for t in rls_tables if t.lower() == table_name.lower()), None)
         
         if matched_table:
-            # Create the filter condition
-            # We assume the column name is "Email" as per requirements
-            cond = f"{final_alias}.Email = '{email}'"
+            # DYNAMIC COLUMN DETECTION
+            col_map = {
+                "employees": "Email",
+                "attendance": "EmployeeEmail",
+                "permissions": "RoleName"
+            }
+            
+            owner_col = col_map.get(matched_table.lower())
+            
+            # If not in map, we could potentially query the DB schema here, 
+            # but for performance we use a sensible default or the map.
+            if not owner_col:
+                owner_col = "Email" # Standard enterprise convention
+            
+            if matched_table.lower() == "permissions":
+                cond = f"LOWER({final_alias}.RoleName) = LOWER('{role}')"
+            else:
+                cond = f"LOWER({final_alias}.{owner_col}) = LOWER('{email}')"
+            
             conditions.append(cond)
 
     # If none of the restricted tables are in the query, return original SQL
